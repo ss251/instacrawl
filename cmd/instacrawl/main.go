@@ -1,10 +1,9 @@
 // Command instacrawl is a local-first archiver for your own Instagram data.
 //
-// This Phase 0 scaffold implements the crawlkit control contract
-// (`metadata --json` / `status --json`) so the crawlctl scheduler can discover
-// and schedule it, plus `version`. The `sync` command is declared in the
-// manifest but not yet implemented — it exits with a clear, honest error rather
-// than pretending to do work.
+// It implements the crawlkit control contract (`metadata --json` /
+// `status --json`) so the crawlctl scheduler can discover and schedule it,
+// `auth` to import/verify the session, and `sync` to archive direct messages
+// into the local SQLite store.
 package main
 
 import (
@@ -115,15 +114,6 @@ func cmdStatus(jsonFlag bool, args []string) error {
 	return output.Write(os.Stdout, format, "status", appmeta.BuildStatus())
 }
 
-func cmdSync(args []string) error {
-	if len(args) > 0 {
-		return usageError{msg: fmt.Sprintf("sync takes no arguments yet, got %v", args)}
-	}
-	// Honest failure: the fetch loop lands in Phase 1+. We do not print a
-	// green success for work that did not happen.
-	return errors.New("sync is not implemented in this scaffold (Phase 0) — see DECISIONS.md for the build plan")
-}
-
 // resolveFormat turns the hoisted --json flag plus any trailing --json into a
 // crawlkit output.Format. A stray unrecognized flag is a usage error.
 func resolveFormat(jsonFlag bool, args []string) (output.Format, error) {
@@ -161,9 +151,9 @@ usage:
 
 commands:
   auth       manage your session: import | status | logout
+  sync       archive your direct messages into the local store
   metadata   print the crawlkit control manifest (JSON)
   status     print archive status (JSON)
-  sync       sync your archive (not yet implemented in this scaffold)
   version    print the version
   help       print this help
 
@@ -172,6 +162,10 @@ auth:
                          [--fetcher web|instagrapi]
   instacrawl auth status [--offline] [--json]
   instacrawl auth logout
+
+sync:
+  instacrawl sync [--include-pending] [--full-recrawl] [--thread <id>]
+                  [--max-inbox-pages N] [--max-thread-pages N]
 
 instacrawl archives ONLY your own logged-in account, stores everything locally,
 and uploads nothing. See README.md and DECISIONS.md.`
