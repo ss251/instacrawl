@@ -3,6 +3,13 @@
 ## [Unreleased]
 
 ### Added
+- Full-text search: `instacrawl search <terms>` searches your archived message
+  text and captions (`--type dm|media|all`, `--limit`, `--json`, `--reindex`),
+  backed by SQLite FTS5 indexes kept in sync by triggers. Ranked by relevance,
+  with a bracketed snippet per hit; unsent messages stay searchable and are
+  flagged. The query and matched content are never logged — results go to your
+  terminal only. `status --json` now reports honest archive counts (messages,
+  media, blobs, …) and the last-sync time.
 - Cache-carve recovery: a new `carve` command recovers the bytes of media whose
   Instagram CDN URLs have expired (the 403s `sync` records as "missing"), reading
   them back from a local browser/app cache with **zero network access**. Point it

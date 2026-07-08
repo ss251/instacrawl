@@ -119,6 +119,13 @@ func cmdSync(args []string) error {
 		fmt.Printf("Feed — %d new media, %d bytes downloaded, %d stories, %d collections%s.\n",
 			sum.MediaNew, sum.BlobsDownloaded, sum.Stories, sum.Collections, liked)
 	}
+
+	// Best-effort: merge the FTS index b-trees after a fully successful sync. A
+	// failure here is a warning, never a sync failure (the index self-heals and
+	// `search --reindex` can rebuild it).
+	if err := st.OptimizeSearch(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "instacrawl: warning: optimizing search index: %v\n", err)
+	}
 	return nil
 }
 

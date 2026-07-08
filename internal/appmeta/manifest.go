@@ -6,12 +6,16 @@
 package appmeta
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/openclaw/crawlkit/control"
 
 	"github.com/ss251/instacrawl/internal/session"
+	"github.com/ss251/instacrawl/internal/store"
 )
 
 const (
@@ -116,6 +120,7 @@ func BuildManifest() control.Manifest {
 		"scope.own_content",
 		"scope.saved_liked",
 		"scope.media_backfill",
+		"search.fts5",
 		"incremental",
 	}
 	m.Privacy = control.Privacy{
@@ -144,9 +149,10 @@ func BuildStatus() control.Status {
 		if wal, werr := os.Stat(dbPath + "-wal"); werr == nil {
 			s.WALBytes = wal.Size()
 		}
+		addArchiveCounts(&s, dbPath)
 	case os.IsNotExist(err):
 		s.State = "empty"
-		s.Summary = "no archive yet — `instacrawl sync` is not implemented in this scaffold"
+		s.Summary = "no archive yet — run `instacrawl auth import`, then `instacrawl sync`"
 	default:
 		s.State = "error"
 		s.Summary = "cannot stat archive database"
@@ -161,4 +167,56 @@ func BuildStatus() control.Status {
 		s.Warnings = append(s.Warnings, "no session imported — run `instacrawl auth import`")
 	}
 	return s
+}
+
+// addArchiveCounts opens the archive READ-ONLY (never creating, migrating, or
+// mutating it) and appends honest per-entity counts plus the last-sync time.
+// Any failure degrades to a warning and leaves State="ready" — status must never
+// fail just because the archive is briefly busy.
+func addArchiveCounts(s *control.Status, dbPath string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	st, err := store.OpenReadOnly(ctx, dbPath)
+	if err != nil {
+		s.Warnings = append(s.Warnings, "could not open archive for counts")
+		return
+	}
+	defer func() { _ = st.Close() }()
+
+	counters := []struct {
+		id, label string
+		fn        func(context.Context) (int, error)
+	}{
+		{"threads", "DM threads", st.CountThreads},
+		{"messages", "messages", st.CountMessages},
+		{"media", "media", st.CountMedia},
+		{"own_posts", "own posts", st.CountOwnPosts},
+		{"saved", "saved", st.CountSaved},
+		{"liked", "liked", st.CountLiked},
+		{"stories", "stories", st.CountStories},
+		{"collections", "collections", st.CountCollections},
+		{"blobs", "media blobs", st.CountBlobs},
+		{"media_files_downloaded", "downloaded files", st.CountDownloadedFiles},
+	}
+	var messages, media int
+	for _, c := range counters {
+		n, err := c.fn(ctx)
+		if err != nil {
+			s.Warnings = append(s.Warnings, "count "+c.id+" unavailable")
+			continue
+		}
+		s.Counts = append(s.Counts, control.NewCount(c.id, c.label, int64(n)))
+		switch c.id {
+		case "messages":
+			messages = n
+		case "media":
+			media = n
+		}
+	}
+	s.Summary = fmt.Sprintf("archive present — %d messages, %d media", messages, media)
+
+	if last, err := st.MaxFetchedAt(ctx); err == nil && last != "" {
+		s.LastSyncAt = last
+	}
 }

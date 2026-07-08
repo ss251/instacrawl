@@ -7,15 +7,15 @@ import "github.com/openclaw/crawlkit/state"
 // refuses to open a DB whose stamped version is NEWER than this. All DDL is
 // `create table if not exists`, so opening a v1 (Phase 1) DB simply adds the DM
 // tables and re-stamps to 2 — no destructive migration, account data intact.
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 // Schema is the full archive schema: the account (Phase 1), crawlkit's cursor
 // table (state.CursorSchema — reused for per-resource resume), the DM tables
-// (Phase 2), and the feed/media tables (Phase 3). Every fetched table carries a
-// `source` column (the reliability lane tag) so the multi-source reconciler
-// merges web/mobile/carve later with no migration, and a `raw_json` column so a
-// parser fix can re-derive rows.
-const Schema = accountSchema + "\n" + state.CursorSchema + "\n" + dmSchema + "\n" + feedSchema
+// (Phase 2), the feed/media tables (Phase 3), and the FTS5 search indexes
+// (Phase 6). Every fetched table carries a `source` column (the reliability lane
+// tag) so the multi-source reconciler merges web/mobile/carve later with no
+// migration, and a `raw_json` column so a parser fix can re-derive rows.
+const Schema = accountSchema + "\n" + state.CursorSchema + "\n" + dmSchema + "\n" + feedSchema + "\n" + searchSchema
 
 const accountSchema = `
 create table if not exists account (
@@ -201,3 +201,50 @@ create index if not exists idx_media_owner        on media(owner_id);
 create index if not exists idx_media_taken        on media(taken_at_us desc);
 create index if not exists idx_media_file_blob     on media_file(blob_hash);
 create index if not exists idx_saved_collection    on saved_item(collection_id);`
+
+// searchSchema is the Phase 6 full-text search layer: two external-content FTS5
+// indexes — one over DM message text, one over media captions — kept in sync by
+// triggers that fire inside the writing transaction (so the index commits
+// atomically with the rows + cursor). External-content means ONLY the named
+// column is indexed: raw_json / media_json / shared_json / link_json are
+// excluded by construction, so a parser change that dropped a field never
+// re-exposes it through search. The unicode61 tokenizer with remove_diacritics
+// folds accents (a query for "cafe" matches "café").
+//
+// The AFTER UPDATE triggers guard on `old.<col> is not new.<col>` (NULL-safe) so
+// an idempotent re-sync — which re-assigns the same text — does not churn the
+// index. Deletes never happen in practice (unsend is a flag, tiering is an
+// update), but the AD trigger is present for correctness if a row is ever
+// removed.
+const searchSchema = `
+create virtual table if not exists dm_message_fts using fts5(
+  text, content='dm_message', content_rowid='rowid',
+  tokenize='unicode61 remove_diacritics 2'
+);
+create trigger if not exists dm_message_fts_ai after insert on dm_message begin
+  insert into dm_message_fts(rowid, text) values (new.rowid, new.text);
+end;
+create trigger if not exists dm_message_fts_ad after delete on dm_message begin
+  insert into dm_message_fts(dm_message_fts, rowid, text) values ('delete', old.rowid, old.text);
+end;
+create trigger if not exists dm_message_fts_au after update of text on dm_message
+when old.text is not new.text begin
+  insert into dm_message_fts(dm_message_fts, rowid, text) values ('delete', old.rowid, old.text);
+  insert into dm_message_fts(rowid, text) values (new.rowid, new.text);
+end;
+
+create virtual table if not exists media_fts using fts5(
+  caption_text, content='media', content_rowid='rowid',
+  tokenize='unicode61 remove_diacritics 2'
+);
+create trigger if not exists media_fts_ai after insert on media begin
+  insert into media_fts(rowid, caption_text) values (new.rowid, new.caption_text);
+end;
+create trigger if not exists media_fts_ad after delete on media begin
+  insert into media_fts(media_fts, rowid, caption_text) values ('delete', old.rowid, old.caption_text);
+end;
+create trigger if not exists media_fts_au after update of caption_text on media
+when old.caption_text is not new.caption_text begin
+  insert into media_fts(media_fts, rowid, caption_text) values ('delete', old.rowid, old.caption_text);
+  insert into media_fts(rowid, caption_text) values (new.rowid, new.caption_text);
+end;`

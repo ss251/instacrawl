@@ -301,6 +301,22 @@ but stays opt-in / off by default.**
   exists. Gate: enabled on a test account, mobile rows merge over web rows with
   no dupes; disabled, zero mobile headers are ever sent; the opt-in flag defaults
   off on a fresh install.
-- **Phase 6 — search, incremental scheduler, release.** Gate: `instacrawl search`
-  returns hits across DMs + posts; a scheduled run appends to JSONL history with
-  a green status.
+- **Phase 6 — search, incremental scheduler, release.** _(**search + status done**
+  — two external-content FTS5 indexes (`dm_message_fts` over message text,
+  `media_fts` over captions), kept in sync by triggers that fire inside the
+  writing transaction so the index commits atomically with the rows + cursor.
+  `SchemaVersion` bumped to **4**; opening a pre-search archive reads the stamped
+  version first and rebuilds the (empty) indexes once. `store.Search` sanitizes
+  every query through crawlkit's `FTS5TokenQuery` and binds it as a parameter
+  (injection-safe); results carry only a bracketed `snippet()` + id/timestamp
+  locators, never bulk content, and the query/content are never logged. The
+  `search` command adds `--type dm|media|all`, `--limit`, `--json`, `--reindex`;
+  `status --json` now reports real per-entity counts + last-sync time via a
+  read-only open. FTS5 availability in the pure-Go `modernc.org/sqlite` driver
+  was verified before building. **Deliberately fenced to post-v1:**
+  `dm_user`/`account`/`collection` (people) search — usernames want infix
+  matching, which is a `LIKE`+`EscapeLike` `--type people` follow-up, not FTS.
+  The "scheduled run appends to JSONL history" half is `crawlctl`'s job — the
+  tool's obligation is an exit-0 green sync + the now-honest `status`.)_ Gate:
+  `instacrawl search` returns hits across DMs + posts; a scheduled run appends to
+  JSONL history with a green status.

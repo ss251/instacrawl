@@ -275,3 +275,7 @@ func (st *Store) CountOwnPosts(ctx context.Context) (int, error) { return st.cou
 func (st *Store) CountBlobs(ctx context.Context) (int, error)    { return st.count(ctx, "media_blob") }
 func (st *Store) CountSaved(ctx context.Context) (int, error)    { return st.count(ctx, "saved_item") }
 func (st *Store) CountStories(ctx context.Context) (int, error)  { return st.count(ctx, "story_item") }
+func (st *Store) CountLiked(ctx context.Context) (int, error)    { return st.count(ctx, "liked_item") }
+func (st *Store) CountCollections(ctx context.Context) (int, error) {
+	return st.count(ctx, "collection")
+}

@@ -62,6 +62,8 @@ func run(args []string) int {
 		err = cmdSync(cmdArgs)
 	case "carve":
 		err = cmdCarve(cmdArgs)
+	case "search":
+		err = cmdSearch(jsonFlag, cmdArgs)
 	default:
 		err = usageError{msg: fmt.Sprintf("unknown command %q", cmd)}
 	}
@@ -155,6 +157,7 @@ commands:
   auth       manage your session: import | status | logout
   sync       archive your DMs and own content (posts, reels, saved, stories)
   carve      recover expired media bytes from a local browser/app cache (offline)
+  search     full-text search your archived DMs and captions
   metadata   print the crawlkit control manifest (JSON)
   status     print archive status (JSON)
   version    print the version
@@ -180,6 +183,13 @@ carve:
   bytes of media whose Instagram CDN URLs have since expired. --format=walker
   (the default) works on any directory of media files; the chromium/indexeddb
   extractors are stubs until validated against a real cache.
+
+search:
+  instacrawl search [--type dm|media|all] [--limit N] [--json] <terms...>
+  instacrawl search --reindex
+
+  Full-text search over your archived message text and captions. Results print
+  to your terminal only — the query and matched content are never logged.
 
 instacrawl archives ONLY your own logged-in account, stores everything locally,
 and uploads nothing. See README.md and DECISIONS.md.`

@@ -12,11 +12,23 @@ nothing.
 ● local-only   ● no telemetry   ● no uploads   ● your own account only
 ```
 
-> [!IMPORTANT]
-> **Status: Phase 0 scaffold.** The control contract (`metadata` / `status`) and
-> the reliability spine are implemented and tested. `sync` — the actual fetch —
-> is not implemented yet. See [`DECISIONS.md`](./DECISIONS.md) for the full
-> architecture and the phase plan.
+## Status
+
+The web-session lane is built end to end — import a session, archive your DMs
+and own content with media, recover expired media from a local cache, and
+full-text search the result. The mobile lane remains opt-in and stubbed.
+
+| Phase | What | State |
+|------:|------|-------|
+| 0 | Control contract + reliability spine | ✅ done |
+| 1 | Web-session auth (`auth import/status/logout`) | ✅ done |
+| 2 | DM / inbox archiver | ✅ done |
+| 3 | Own content — posts, reels, stories, saved, liked + media bytes | ✅ done |
+| 4 | Cache-carve — recover expired media offline (walker; chromium/indexeddb stubbed) | ✅ done |
+| 5 | Mobile private-API lane | ⏳ opt-in, stubbed |
+| 6 | Full-text search + honest status | ✅ done |
+
+See [`DECISIONS.md`](./DECISIONS.md) for the full architecture and the phase plan.
 
 ## What it does
 
@@ -25,10 +37,37 @@ nothing.
 - **Keeps it local and searchable.** One SQLite file at `~/.instacrawl/`, media
   as content-addressed files on disk, full-text search over your messages and
   captions.
+- **Recovers expired media offline.** Instagram's CDN URLs expire; `instacrawl
+  carve` reads a local browser/app cache to backfill the bytes, with zero network
+  access.
 - **Fails loud, never silently empty.** A `200 OK` is not treated as success on
   its own — every response is classified (`OK` / `AUTH·CHECKPOINT` /
   `RATE·LIMITED` / `SCHEMA·DRIFT`) before anything is written, so a blocked or
   changed API produces a clear stop, not a quietly empty archive.
+
+## Usage
+
+```sh
+# 1. Import the session from your logged-in browser's instagram.com cookies
+#    (Cookie-Editor → JSON, or a cookies.txt export). The cookie value is read
+#    from stdin or a file — never a command-line argument (shell-history leak).
+pbpaste | instacrawl auth import --stdin
+instacrawl auth status                 # OK — logged in as @you
+
+# 2. Archive
+instacrawl sync                        # DMs + own content + media
+instacrawl sync --only feed --no-media # just the feed metadata, faster
+
+# 3. Recover any media whose CDN URLs expired, from a local cache (offline)
+instacrawl carve --dir ~/path/to/a/media/cache --dry-run
+
+# 4. Search your archive (results go to your terminal only)
+instacrawl search aurora
+instacrawl search --type dm "trip to japan"
+instacrawl search --type media sunset --limit 50
+
+instacrawl status --json               # honest counts: messages, media, …
+```
 
 ## Honest use — please read
 
@@ -59,21 +98,22 @@ If you are not comfortable with these trade-offs, don't run it.
 ## Privacy & security
 
 - **Nothing leaves your machine.** No telemetry, no uploads, no remote calls
-  except to Instagram itself to fetch your own data.
+  except to Instagram itself to fetch your own data. `carve` and `search` make
+  no network calls at all.
 - **Secrets live in your OS keychain**, never in plaintext config. Session
   cookies and tokens are redacted from all logs.
 - **Your archive and config are git-ignored.** DM content is never committed or
-  logged.
+  logged, and `search` never logs the query or the matched text — results print
+  to your terminal only.
 
 ## Install
 
 _Not yet released._ A Homebrew tap will follow the first tagged release. To
-build the current scaffold from source:
+build from source:
 
 ```sh
 go build -o instacrawl ./cmd/instacrawl
-./instacrawl metadata --json    # prints the crawlkit control manifest
-./instacrawl status --json      # prints archive status (empty until you sync)
+./instacrawl --help
 ```
 
 Requires Go 1.26.4+.
@@ -83,10 +123,10 @@ Requires Go 1.26.4+.
 instacrawl satisfies the crawlkit `control` contract, so the `crawlctl`
 scheduler can discover it, schedule periodic syncs, lock against overlap, and
 log runs — without instacrawl shipping its own scheduler. crawlkit provides the
-SQLite store, FTS5 search, content-addressed media storage, snapshots, and
-encrypted backup; instacrawl builds the Instagram-specific fetch, pagination,
-verification, and multi-source reconciliation on top. Details in
-[`DECISIONS.md`](./DECISIONS.md).
+SQLite store, FTS5 search primitives, content-addressed media storage,
+snapshots, and encrypted backup; instacrawl builds the Instagram-specific fetch,
+pagination, verification, multi-source reconciliation, and the FTS index on top.
+Details in [`DECISIONS.md`](./DECISIONS.md).
 
 ## License
 
