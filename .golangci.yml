@@ -1,0 +1,35 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - errcheck
+    - errorlint
+    - gocritic
+    - govet
+    - ineffassign
+    - misspell
+    - nilerr
+    - nilnil
+    - rowserrcheck
+    - sqlclosecheck
+    - staticcheck
+    - unconvert
+    - unused
+    - whitespace
+  exclusions:
+    rules:
+      # In client tests the fake response body is consumed and closed by the
+      # client under test, not by the test function itself.
+      - path: _test\.go
+        linters:
+          - bodyclose
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

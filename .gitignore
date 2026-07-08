@@ -1,0 +1,45 @@
+# === instacrawl: never commit the archive or any credentials ===
+# The archive contains private DM content; config may reference secrets.
+# Secrets live in the OS keychain, but keep every belt-and-suspenders here.
+.instacrawl/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Session bundles / cookies / tokens if ever written to disk (they shouldn't be)
+config.toml
+*.session
+*.cookies
+cookies.txt
+*.secrets
+.env
+.env.*
+
+# Fetched media / raw response dumps (may contain private content)
+media/
+raw/
+*.har
+
+# === Go ===
+# Built binaries
+/instacrawl
+/cmd/instacrawl/instacrawl
+*.exe
+*.out
+# Test & coverage artifacts
+*.test
+coverage.out
+*.prof
+
+# === Editor / OS ===
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# === Internal working artifacts — not part of the public repo ===
+# Lavish review surfaces and the private session handoff are internal notes.
+.lavish/
+KICKOFF.md
