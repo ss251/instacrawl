@@ -74,10 +74,28 @@ func (c *Client) FetchSelfProfile(ctx context.Context, b *session.WebBundle) (ig
 	if b == nil {
 		return ig.RawResponse{}, fmt.Errorf("nil session bundle")
 	}
-	reqURL := c.urlFor(b.DSUserID)
+	return c.do(ctx, b, c.urlFor(b.DSUserID))
+}
+
+// Fetch issues an arbitrary GET against a host-relative request path + query.
+func (c *Client) Fetch(ctx context.Context, b *session.WebBundle, req ig.Request) (ig.RawResponse, error) {
+	if b == nil {
+		return ig.RawResponse{}, fmt.Errorf("nil session bundle")
+	}
+	reqURL := ig.WebHost + req.Path
+	if len(req.Query) > 0 {
+		reqURL += "?" + req.Query.Encode()
+	}
+	return c.do(ctx, b, reqURL)
+}
+
+// do performs the shared cookie-seed + header + GET + bounded-read flow. An HTTP
+// error status is returned inside RawResponse; only a transport failure returns
+// a non-nil error.
+func (c *Client) do(ctx context.Context, b *session.WebBundle, reqURL string) (ig.RawResponse, error) {
 	u, err := url.Parse(reqURL)
 	if err != nil {
-		return ig.RawResponse{}, fmt.Errorf("bad probe URL: %w", err)
+		return ig.RawResponse{}, fmt.Errorf("bad request URL: %w", err)
 	}
 	c.seedCookies(u, b)
 

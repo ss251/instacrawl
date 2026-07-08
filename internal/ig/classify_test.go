@@ -156,6 +156,9 @@ type fakeFetcher struct {
 func (f fakeFetcher) FetchSelfProfile(context.Context, *session.WebBundle) (RawResponse, error) {
 	return f.resp, f.err
 }
+func (f fakeFetcher) Fetch(context.Context, *session.WebBundle, Request) (RawResponse, error) {
+	return f.resp, f.err
+}
 func (f fakeFetcher) Name() string { return "fake" }
 
 func TestProbeThroughSeam(t *testing.T) {

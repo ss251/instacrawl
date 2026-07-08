@@ -21,9 +21,11 @@ func (f *flexID) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// profileBody is the union of the fields the classifier reads across the OK,
-// checkpoint, and error response shapes. Absent fields stay zero.
-type profileBody struct {
+// envelope is the endpoint-agnostic subset of any IG JSON response: the
+// top-level status/message and the several shapes a challenge URL can take.
+// Every endpoint (profile, inbox, thread, …) shares these, which is why the
+// auth/rate/checkpoint gate can be shared across all of them.
+type envelope struct {
 	Status        string `json:"status"`
 	Message       string `json:"message"`
 	CheckpointURL string `json:"checkpoint_url"`
@@ -31,6 +33,24 @@ type profileBody struct {
 	Challenge     *struct {
 		URL string `json:"url"`
 	} `json:"challenge"`
+}
+
+func (e envelope) challenge() string {
+	if e.CheckpointURL != "" {
+		return e.CheckpointURL
+	}
+	if e.ChallengeURL != "" {
+		return e.ChallengeURL
+	}
+	if e.Challenge != nil && e.Challenge.URL != "" {
+		return e.Challenge.URL
+	}
+	return ""
+}
+
+// profileBody embeds the shared envelope and adds the self-profile payload.
+type profileBody struct {
+	envelope
 	User *struct {
 		PK            flexID `json:"pk"`
 		PKID          flexID `json:"pk_id"`
@@ -41,113 +61,126 @@ type profileBody struct {
 	} `json:"user"`
 }
 
-// Classify is the pure four-state gate over a single response. It is
-// deterministic and does no I/O, so it is exhaustively fixture-testable. The
-// ordering is auth → rate → shape, because a checkpoint can arrive dressed as a
-// 200, a 302, or a 400, so it must be checked before the happy-path parse.
+// ClassifyEnvelope applies the endpoint-agnostic half of the four-state gate:
+// the auth / checkpoint / rate-limit / server-error detection that is identical
+// for every IG endpoint. The ordering is auth → rate → shape, because a
+// checkpoint can arrive dressed as a 200, a 302, or a 400.
 //
-// The identity assertion lives INSIDE the gate: OK(1) is returned only when the
-// server-returned pk equals expectedUserID. A correctly-shaped 200 for the
-// WRONG account is a terminal AUTH·CHECKPOINT, never a silent success — this is
-// the whole point of "a 200 is not success."
-func Classify(resp RawResponse, expectedUserID string) ProbeResult {
-	out := ProbeResult{WWWClaim: resp.WWWClaim}
-
+//   - terminal == true: the returned Verdict is final; the caller returns it
+//     immediately (it is one of AUTH·CHECKPOINT / RATE·LIMITED / SCHEMA·DRIFT).
+//     challengeURL is set on AUTH·CHECKPOINT when discoverable.
+//   - terminal == false: a clean HTTP 200 whose envelope carries no auth/rate
+//     signal. The caller must parse it with its OWN payload parser and decide
+//     OK vs SCHEMA·DRIFT from the payload shape.
+//
+// This is pure and deterministic — no I/O — so it is exhaustively fixture-tested.
+func ClassifyEnvelope(resp RawResponse) (verdict reliability.Verdict, challengeURL string, terminal bool) {
 	// 1. Redirect to a login/challenge page (3xx + Location).
 	if isRedirect(resp.Status) {
 		loc := strings.ToLower(resp.Location)
 		if strings.Contains(loc, "/accounts/login") || strings.Contains(loc, "/challenge") {
-			out.ChallengeURL = resp.Location
-			out.Verdict = reliability.Fail(reliability.StateAuthCheckpoint,
-				"redirected to login/challenge: "+resp.Location)
-			return out
+			return reliability.Fail(reliability.StateAuthCheckpoint,
+				"redirected to login/challenge: "+resp.Location), resp.Location, true
 		}
 	}
 
 	// 2. An HTML login wall (logged-out web frequently returns 200 + HTML).
 	//    Check this BEFORE attempting a JSON parse, or it misclassifies as drift.
 	if looksLikeHTML(resp) {
-		out.Verdict = reliability.Fail(reliability.StateAuthCheckpoint,
-			"received an HTML page (login wall) instead of a JSON profile — session is logged out")
-		return out
+		return reliability.Fail(reliability.StateAuthCheckpoint,
+			"received an HTML page (login wall) instead of a JSON response — session is logged out"), "", true
 	}
 
-	// Attempt to parse the body as the profile/error union. A parse failure is
-	// not fatal by itself; later branches still classify by status.
-	var body profileBody
-	parseErr := json.Unmarshal(resp.Body, &body)
+	var env envelope
+	parseErr := json.Unmarshal(resp.Body, &env)
 
 	// 3. Explicit auth/challenge signals in a JSON body.
 	if parseErr == nil {
-		msg := strings.ToLower(strings.TrimSpace(body.Message))
-		if url := challengeURL(body); url != "" || isAuthMessage(msg) {
-			out.ChallengeURL = url
-			out.Verdict = reliability.Fail(reliability.StateAuthCheckpoint,
-				fmt.Sprintf("authentication required (message=%q)", body.Message))
-			return out
+		msg := strings.ToLower(strings.TrimSpace(env.Message))
+		if url := env.challenge(); url != "" || isAuthMessage(msg) {
+			return reliability.Fail(reliability.StateAuthCheckpoint,
+				fmt.Sprintf("authentication required (message=%q)", env.Message)), url, true
 		}
 	}
 
 	// 4. Unauthorized status codes.
 	if resp.Status == 401 || resp.Status == 403 {
-		out.Verdict = reliability.Fail(reliability.StateAuthCheckpoint,
-			fmt.Sprintf("unauthorized (HTTP %d) — session invalid or checkpointed", resp.Status))
-		return out
+		return reliability.Fail(reliability.StateAuthCheckpoint,
+			fmt.Sprintf("unauthorized (HTTP %d) — session invalid or checkpointed", resp.Status)), "", true
 	}
 
 	// 5. Rate limiting: 429, or a feedback_required / "please wait" body.
-	if resp.Status == 429 || (parseErr == nil && isRateMessage(strings.ToLower(body.Message))) {
-		reason := fmt.Sprintf("rate limited (HTTP %d, message=%q)", resp.Status, body.Message)
+	if resp.Status == 429 || (parseErr == nil && isRateMessage(strings.ToLower(env.Message))) {
+		reason := fmt.Sprintf("rate limited (HTTP %d, message=%q)", resp.Status, env.Message)
 		if resp.RetryAfter != "" {
 			reason += "; Retry-After=" + resp.RetryAfter
 		}
-		out.Verdict = reliability.Fail(reliability.StateRateLimited, reason)
-		return out
+		return reliability.Fail(reliability.StateRateLimited, reason), "", true
 	}
 
 	// 6. Server errors: back off and stop.
 	if resp.Status >= 500 && resp.Status <= 599 {
-		out.Verdict = reliability.Fail(reliability.StateRateLimited,
-			fmt.Sprintf("server error (HTTP %d) — backing off", resp.Status))
+		return reliability.Fail(reliability.StateRateLimited,
+			fmt.Sprintf("server error (HTTP %d) — backing off", resp.Status)), "", true
+	}
+
+	// 7. Any non-200 that reached here is an unexpected shape — fail loud.
+	if resp.Status != 200 {
+		return reliability.Fail(reliability.StateSchemaDrift,
+			fmt.Sprintf("unexpected response (HTTP %d) — dumping raw for triage", resp.Status)), "", true
+	}
+
+	// Clean 200 — the caller parses the payload.
+	return reliability.Verdict{}, "", false
+}
+
+// Classify is the profile-specific gate: it runs the shared envelope gate, then
+// (on a clean 200) parses the self-profile payload and asserts the returned pk
+// equals expectedUserID. OK(1) is returned only when the shape AND the account
+// identity both check out — a correctly-shaped 200 for the WRONG account is a
+// terminal AUTH·CHECKPOINT, never a silent success.
+func Classify(resp RawResponse, expectedUserID string) ProbeResult {
+	out := ProbeResult{WWWClaim: resp.WWWClaim}
+
+	v, challengeURL, terminal := ClassifyEnvelope(resp)
+	if terminal {
+		out.Verdict = v
+		out.ChallengeURL = challengeURL
+		if v.State == reliability.StateSchemaDrift {
+			out.RawBody = string(resp.Body)
+		}
 		return out
 	}
 
-	// 7. Happy path: 200 with a parseable profile.
-	if resp.Status == 200 {
-		if parseErr != nil {
-			out.RawBody = string(resp.Body)
-			out.Verdict = reliability.Fail(reliability.StateSchemaDrift,
-				"200 OK but body is not valid JSON — dumping raw for re-parse")
-			return out
-		}
-		if body.User == nil || string(body.User.PK) == "" || body.User.Username == "" {
-			out.RawBody = string(resp.Body)
-			out.Verdict = reliability.Fail(reliability.StateSchemaDrift,
-				"200 OK but required keys (user.pk, user.username) are missing/renamed — dumping raw for re-parse")
-			return out
-		}
-		pk := strings.TrimSpace(string(body.User.PK))
-		if expectedUserID != "" && pk != strings.TrimSpace(expectedUserID) {
-			out.Verdict = reliability.Fail(reliability.StateAuthCheckpoint,
-				fmt.Sprintf("authenticated as %s but expected %s — refusing to archive the wrong account", pk, expectedUserID))
-			return out
-		}
-		out.Account = &Account{
-			PK:            pk,
-			Username:      body.User.Username,
-			FullName:      body.User.FullName,
-			IsPrivate:     body.User.IsPrivate,
-			ProfilePicURL: body.User.ProfilePicURL,
-			RawJSON:       string(resp.Body),
-		}
-		out.Verdict = reliability.OK(1)
+	// Clean 200: parse the profile payload.
+	var body profileBody
+	if err := json.Unmarshal(resp.Body, &body); err != nil {
+		out.RawBody = string(resp.Body)
+		out.Verdict = reliability.Fail(reliability.StateSchemaDrift,
+			"200 OK but body is not valid JSON — dumping raw for re-parse")
 		return out
 	}
-
-	// 8. Anything else is an unexpected shape — fail loud, retain raw.
-	out.RawBody = string(resp.Body)
-	out.Verdict = reliability.Fail(reliability.StateSchemaDrift,
-		fmt.Sprintf("unexpected response (HTTP %d) — dumping raw for triage", resp.Status))
+	if body.User == nil || string(body.User.PK) == "" || body.User.Username == "" {
+		out.RawBody = string(resp.Body)
+		out.Verdict = reliability.Fail(reliability.StateSchemaDrift,
+			"200 OK but required keys (user.pk, user.username) are missing/renamed — dumping raw for re-parse")
+		return out
+	}
+	pk := strings.TrimSpace(string(body.User.PK))
+	if expectedUserID != "" && pk != strings.TrimSpace(expectedUserID) {
+		out.Verdict = reliability.Fail(reliability.StateAuthCheckpoint,
+			fmt.Sprintf("authenticated as %s but expected %s — refusing to archive the wrong account", pk, expectedUserID))
+		return out
+	}
+	out.Account = &Account{
+		PK:            pk,
+		Username:      body.User.Username,
+		FullName:      body.User.FullName,
+		IsPrivate:     body.User.IsPrivate,
+		ProfilePicURL: body.User.ProfilePicURL,
+		RawJSON:       string(resp.Body),
+	}
+	out.Verdict = reliability.OK(1)
 	return out
 }
 
@@ -177,17 +210,4 @@ func isRateMessage(msg string) bool {
 		return true
 	}
 	return strings.Contains(msg, "please wait") || strings.Contains(msg, "wait a few minutes")
-}
-
-func challengeURL(body profileBody) string {
-	if body.CheckpointURL != "" {
-		return body.CheckpointURL
-	}
-	if body.ChallengeURL != "" {
-		return body.ChallengeURL
-	}
-	if body.Challenge != nil && body.Challenge.URL != "" {
-		return body.Challenge.URL
-	}
-	return ""
 }

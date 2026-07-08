@@ -36,5 +36,10 @@ func (f *Fetcher) FetchSelfProfile(context.Context, *session.WebBundle) (ig.RawR
 	return ig.RawResponse{}, ErrNotImplemented
 }
 
+// Fetch is not implemented until the mobile lane lands (Phase 5).
+func (f *Fetcher) Fetch(context.Context, *session.WebBundle, ig.Request) (ig.RawResponse, error) {
+	return ig.RawResponse{}, ErrNotImplemented
+}
+
 // compile-time assertion that the stub satisfies the seam.
 var _ ig.Fetcher = (*Fetcher)(nil)
