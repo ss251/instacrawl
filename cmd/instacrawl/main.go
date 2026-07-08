@@ -60,6 +60,8 @@ func run(args []string) int {
 		err = cmdAuth(jsonFlag, cmdArgs)
 	case "sync":
 		err = cmdSync(cmdArgs)
+	case "carve":
+		err = cmdCarve(cmdArgs)
 	default:
 		err = usageError{msg: fmt.Sprintf("unknown command %q", cmd)}
 	}
@@ -152,6 +154,7 @@ usage:
 commands:
   auth       manage your session: import | status | logout
   sync       archive your DMs and own content (posts, reels, saved, stories)
+  carve      recover expired media bytes from a local browser/app cache (offline)
   metadata   print the crawlkit control manifest (JSON)
   status     print archive status (JSON)
   version    print the version
@@ -168,6 +171,15 @@ sync:
                   [--include-pending] [--thread <id>]
                   [--include-saved] [--include-collections] [--include-stories]
                   [--include-liked] [--max-feed-pages N]
+
+carve:
+  instacrawl carve --dir <cache-path> [--dir <cache-path> ...]
+                   [--dry-run] [--format walker|chromium|indexeddb]
+
+  Zero-network: reads only the local cache you point it at, and backfills the
+  bytes of media whose Instagram CDN URLs have since expired. --format=walker
+  (the default) works on any directory of media files; the chromium/indexeddb
+  extractors are stubs until validated against a real cache.
 
 instacrawl archives ONLY your own logged-in account, stores everything locally,
 and uploads nothing. See README.md and DECISIONS.md.`

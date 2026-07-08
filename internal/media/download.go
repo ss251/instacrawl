@@ -52,11 +52,13 @@ type Result struct {
 }
 
 // Downloader fetches media bytes over HTTP and stores them content-addressed
-// on disk. Build one with New; the zero value is not usable.
+// on disk. It embeds the shared *BlobStore (so it inherits Dir and the atomic,
+// de-duplicating write path); it adds the HTTP fetch and the bounded worker
+// pool on top. Build one with New; the zero value is not usable.
 type Downloader struct {
 	httpClient  *http.Client
-	dir         string
 	concurrency int
+	*BlobStore
 }
 
 // Option configures a Downloader built by New.
@@ -89,17 +91,14 @@ func WithConcurrency(n int) Option {
 func New(dir string, opts ...Option) *Downloader {
 	d := &Downloader{
 		httpClient:  &http.Client{Timeout: defaultTimeout},
-		dir:         dir,
 		concurrency: defaultConcurrency,
+		BlobStore:   NewBlobStore(dir),
 	}
 	for _, opt := range opts {
 		opt(d)
 	}
 	return d
 }
-
-// Dir returns the root directory Downloader stores files under.
-func (d *Downloader) Dir() string { return d.dir }
 
 // Download fetches every target through a bounded pool of d.concurrency
 // worker goroutines and returns one Result per target, in the same order as
@@ -166,7 +165,7 @@ func (d *Downloader) fetch(ctx context.Context, t Target) Result {
 		return Result{URL: t.URL, Err: fmt.Errorf("download %s: unexpected status %d", t.URL, resp.StatusCode)}
 	}
 
-	hash, size, path, err := d.store(resp.Body, resp.ContentLength)
+	hash, size, path, err := d.Put(resp.Body, resp.ContentLength)
 	if err != nil {
 		return Result{URL: t.URL, Err: fmt.Errorf("download %s: %w", t.URL, err)}
 	}

@@ -41,12 +41,19 @@ func MediaFieldCount(code, captionText string, hasFiles bool) int {
 
 // MediaTier picks the winning Media by the named tie-break:
 //  1. more non-empty identifying fields (MediaFieldCount),
-//  2. tie → the more recent capture (caller passes incomingNewer),
+//  2. tie → the more recent capture,
 //  3. tie → lane order web > mobile > carve.
 //
-// It is pure and testable; the store applies it (with fetched_at as the
-// recency signal) inside its upsert.
-func MediaTier(existing, incoming Media, incomingNewer bool) Media {
+// recencyCmp is the sign of (incoming.fetched_at − existing.fetched_at): > 0
+// when incoming was captured more recently, 0 when equal, < 0 when incoming is
+// strictly older. Recency is applied BEFORE lane (step 2 before step 3), so a
+// strictly-older incoming loses on recency even if its lane outranks — an older
+// cache carve can never displace a fresher web row of equal richness.
+//
+// It is pure and testable; the store applies exactly this logic (with fetched_at
+// as the recency signal) inside its upsert WHERE clause, and a cross-check test
+// (TestMediaTierSQLMatchesGo) asserts the two never drift apart.
+func MediaTier(existing, incoming Media, recencyCmp int) Media {
 	existingCount := MediaFieldCount(existing.Code, existing.CaptionText, len(existing.Files) > 0)
 	incomingCount := MediaFieldCount(incoming.Code, incoming.CaptionText, len(incoming.Files) > 0)
 	switch {
@@ -55,9 +62,12 @@ func MediaTier(existing, incoming Media, incomingNewer bool) Media {
 	case incomingCount < existingCount:
 		return existing
 	}
-	// Equal field counts: prefer the more recent capture.
-	if incomingNewer {
+	// Equal field counts: the more recent capture wins, before lane is consulted.
+	switch {
+	case recencyCmp > 0:
 		return incoming
+	case recencyCmp < 0:
+		return existing
 	}
 	// Same recency: highest lane wins.
 	if laneRank(incoming.Source) > laneRank(existing.Source) {

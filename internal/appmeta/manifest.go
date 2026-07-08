@@ -79,6 +79,11 @@ func BuildManifest() control.Manifest {
 			Argv:    []string{"sync"},
 			Mutates: true,
 		},
+		"carve": {
+			Title:   "Recover expired media bytes from a local cache (offline)",
+			Argv:    []string{"carve"},
+			Mutates: true,
+		},
 		"status": {
 			Title: "Report archive status",
 			Argv:  []string{"status", "--json"},
@@ -100,10 +105,17 @@ func BuildManifest() control.Manifest {
 	m.Capabilities = []string{
 		"source.web",        // default lane: real browser cookies
 		"source.mobile.opt", // opt-in lane: private mobile API, off by default
-		"source.carve",      // zero-network local cache carve
+		// Carve is the zero-network local-cache lane. Its extractor states are
+		// advertised honestly: the format-agnostic walker is live; the
+		// format-specific Chromium/IndexedDB extractors are stubs until validated
+		// against a real cache (Phase 4b) and must not be presented as working.
+		"source.carve.walker.active",
+		"source.carve.chromium.stub",
+		"source.carve.indexeddb.stub",
 		"scope.dms",
 		"scope.own_content",
 		"scope.saved_liked",
+		"scope.media_backfill",
 		"incremental",
 	}
 	m.Privacy = control.Privacy{

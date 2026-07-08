@@ -204,7 +204,10 @@ on conflict(pk) do update set
   caption_text=excluded.caption_text, caption_created_at_us=excluded.caption_created_at_us,
   field_count=excluded.field_count, source=excluded.source, fetched_at=excluded.fetched_at, raw_json=excluded.raw_json
 where excluded.field_count > media.field_count
-   or (excluded.field_count = media.field_count and excluded.fetched_at >= media.fetched_at)`,
+   or (excluded.field_count = media.field_count and excluded.fetched_at > media.fetched_at)
+   or (excluded.field_count = media.field_count and excluded.fetched_at = media.fetched_at
+       and (case excluded.source when 'web' then 3 when 'mobile' then 2 when 'carve' then 1 else 0 end)
+         > (case media.source    when 'web' then 3 when 'mobile' then 2 when 'carve' then 1 else 0 end))`,
 		m.PK, m.Code, m.MediaType, boolToInt(m.Known), m.ProductType, m.OwnerID, m.TakenAtUS,
 		m.CaptionText, m.CaptionCreatedAtUS, fc, srcOr(m.Source), now, nullIfEmpty(m.RawJSON))
 	if err != nil {

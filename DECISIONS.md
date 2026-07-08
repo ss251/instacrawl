@@ -84,9 +84,27 @@ order: (1) more non-null fields, then (2) higher `fetched_at`, then (3) lane
 order web > mobile > carve as a final deterministic tiebreak. This rule is
 written here so it is auditable, not improvised per call site.
 
+**Two reconciliation planes (refined Phase 4 — carve made this precise):** a
+media row has a *metadata* plane (the `media` identity row: code, caption,
+type…) and a *bytes* plane (`media_file` → `media_blob`). They reconcile by
+**different rules and must not be conflated**:
+- **Metadata reconciles by richness/recency** — the tie-break above, executed by
+  the `upsertMedia` `on conflict` WHERE clause. A leaner row never clobbers a
+  richer one whatever lane produced it.
+- **Bytes reconcile by fill-only-empty** — bytes are content-addressed, so they
+  are only ever *present or absent*, never "richer". A lane may only transition a
+  `media_file` from no-bytes (`downloaded=0`) to bytes; it may never replace an
+  existing `blob_hash`. This is why the carve lane backfills through a guarded
+  `downloaded=0` update (`store.BackfillMediaFile`) and **never** through the
+  metadata upsert path — routing carve bytes through `upsertMediaFile` (which is
+  last-writer-wins and lane-hardcoded) would let a carve pass clobber a live
+  download. Byte provenance is recorded on `media_blob.source`; `media_file`'s
+  own `source` stays the metadata provenance.
+
 **Zero-migration corollary:** because every row is `source`-tagged and merged by
 richness, adding or removing a lane later touches no schema and no existing
-rows. This is *why* "both" (fork B) costs no new architecture.
+rows. This is *why* "both" (fork B) costs no new architecture. Carve confirmed
+this: it added a whole source lane at `SchemaVersion` **3**, zero DDL.
 
 ---
 
@@ -254,9 +272,31 @@ but stays opt-in / off by default.**
   feeds the count gate. Full binary end-to-end awaits the owner-run session
   import.)_ Gate: counts non-degenerate vs known account totals; re-run is a
   snapshot no-op.
-- **Phase 4 — cache-carve source + reconciler.** Gate: an API-expired (403)
-  media file present in cache is recovered; a carved stub never overwrites a
-  richer API row; merge is idempotent.
+- **Phase 4 — cache-carve source + reconciler.** Split into two gated halves so
+  the phase stays honest about what is proven vs. what awaits real artifacts:
+  - **4a — reconciler + format-agnostic walker (offline-provable).** The source
+    reconciler (metadata plane = the completed `upsertMedia` richness/lane
+    tie-break; bytes plane = `store.BackfillMediaFile`'s fill-only-empty guard),
+    the pure `internal/carve` domain (a `Source` seam, CDN-basename attribution,
+    magic-byte sniffing), a format-agnostic `internal/carvefs` directory walker
+    (the one live carve source: a content-sniffing walk that yields media bytes
+    keyed by filename), and the `internal/carvesync` orchestrator + `carve`
+    command. Gate (fully offline, no live IG, no real cache): an API-expired
+    (403) `media_file` is recovered from a fixture cache dir by URL-basename
+    attribution; a carved stub never overwrites a richer row (and vice-versa);
+    the merge is idempotent; carve never touches an already-downloaded row's
+    bytes. **Recency is the artifact's capture time (file mtime), not run time**,
+    so a stale cache can't out-rank a fresh fetch. Zero DDL (`SchemaVersion` stays
+    3). Carve **imports no `net/http`** — a review-enforced, greppable invariant.
+  - **4b — owner-artifact validation + format-specific extractors.** The
+    Chromium `disk_cache`/Cache-Storage and IndexedDB extractors are **not**
+    guessed at from a format spec; they ship as honest stubs (the `igmobile`
+    pattern) behind `--format=chromium|indexeddb`, and are built only after the
+    owner runs `carve --dry-run` against a copy of their real browser/app cache
+    (the 1b/2b/3b live-probe pattern, applied to on-disk formats). Until then the
+    walker is the default and only active source; `status --json` reports each
+    extractor's state (`walker: active`, `chromium: stub`, …) so the tool never
+    claims carve is "done" when only the format-agnostic path is proven.
 - **Phase 5 — mobile API source (opt-in lane).** Built after the reconciler
   exists. Gate: enabled on a test account, mobile rows merge over web rows with
   no dupes; disabled, zero mobile headers are ever sent; the opt-in flag defaults

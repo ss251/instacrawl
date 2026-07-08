@@ -264,24 +264,32 @@ func TestMediaFieldCountAndTier(t *testing.T) {
 
 	rich := Media{PK: "1", Code: "ABC", CaptionText: "hi", Files: []MediaFile{{Kind: "image"}}, Source: "web"}
 	stub := Media{PK: "1", Source: "web"}
-	if got := MediaTier(rich, stub, true); got.Code != "ABC" {
+	if got := MediaTier(rich, stub, 1); got.Code != "ABC" {
 		t.Fatal("a bare stub must never clobber a richer media row, even if newer")
 	}
-	if got := MediaTier(stub, rich, true); got.Code != "ABC" {
+	if got := MediaTier(stub, rich, 1); got.Code != "ABC" {
 		t.Fatal("a richer media row must win over a stub")
 	}
 
 	// Equal field count → newer capture wins.
 	a := Media{Code: "A", Source: "web"}
 	b := Media{Code: "B", Source: "web"}
-	if got := MediaTier(a, b, true); got.Code != "B" {
+	if got := MediaTier(a, b, 1); got.Code != "B" {
 		t.Fatal("equal field count → newer capture wins")
 	}
 
 	// Equal field count, same recency → higher lane wins.
 	c := Media{Code: "C", Source: "mobile"}
 	d := Media{Code: "D", Source: "web"}
-	if got := MediaTier(c, d, false); got.Code != "D" {
+	if got := MediaTier(c, d, 0); got.Code != "D" {
 		t.Fatal("equal field count, same recency → higher lane (web) wins")
+	}
+
+	// Recency beats lane: a strictly-OLDER incoming loses even with a higher
+	// lane. existing=carve but newer; incoming=web but older → carve stays.
+	newerCarve := Media{Code: "E", Source: "carve"}
+	olderWeb := Media{Code: "F", Source: "web"}
+	if got := MediaTier(newerCarve, olderWeb, -1); got.Code != "E" {
+		t.Fatal("equal field count, incoming older → existing wins despite incoming's higher lane")
 	}
 }

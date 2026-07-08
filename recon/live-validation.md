@@ -62,6 +62,25 @@ binary end-to-end is gated, and is left to the owner).
 - `/users/{id}/info/` carries `media_count` (the own-post total for the Phase 3
   count gate).
 
+### Phase 4 (carve) — offline-provable; live artifacts deferred to 4b
+Phase 4a needs **no live IG and no real cache**: the carve lane reads local disk,
+so its full gate is proved offline (the three-clause postcondition — recover an
+expired 403 from a fixture cache dir, never clobber a downloaded row, idempotent
+re-run — plus the SQL-vs-Go reconciler cross-check over every source × richness ×
+recency pair). Nothing here rides a schema-only browser probe because there is no
+network call to probe.
+
+What **is** deferred to 4b (the on-disk-format equivalent of the 1b/2b/3b live
+probe): the Chromium `disk_cache` / Cache-Storage and IndexedDB extractors. Their
+formats are version-specific and are NOT guessed at — the owner runs
+`instacrawl carve --dry-run --dir <copy-of-real-cache>` (browser closed) and the
+dry-run reports files walked, media sniffed, and canonical-key matches vs the
+undownloaded set. If the format-agnostic walker already attributes a useful
+fraction, the extractor may never be built; if it attributes ~0, sanitized real
+entries (owner's own media only) become `carvefs/testdata` and the extractor is
+built against them. Until then `--format=chromium|indexeddb` refuse loudly and
+the walker is the only active source.
+
 ### Method notes
 - `ds_user_id` and `sessionid` are httpOnly (not in `document.cookie`); read them
   via CDP `Network.getCookies` when needed. The authenticated `fetch` sends them

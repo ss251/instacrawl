@@ -3,6 +3,17 @@
 ## [Unreleased]
 
 ### Added
+- Cache-carve recovery: a new `carve` command recovers the bytes of media whose
+  Instagram CDN URLs have expired (the 403s `sync` records as "missing"), reading
+  them back from a local browser/app cache with **zero network access**. Point it
+  at a cache directory (`carve --dir <path>`, `--dry-run` to preview) and it
+  attributes files to your archive by CDN filename, verifies each by content, and
+  fills only the byte slots that are empty — it never overwrites bytes you already
+  have, and re-running is a no-op. The source reconciler that underpins the whole
+  archive now merges every lane (web / mobile / carve) by richness then recency
+  then lane, so a stale cache can never displace a fresher fetch. The
+  format-specific Chromium/IndexedDB cache extractors are stubbed until validated
+  against a real cache; the format-agnostic directory walker is the default.
 - Own-content archiver: `sync` now also captures your posts, reels, saved posts,
   saved collections, and currently-live stories, and downloads the media bytes
   into a content-addressed store on disk (deduplicated by SHA256; CDN URLs are
