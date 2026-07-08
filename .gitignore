@@ -28,6 +28,7 @@ cookies.txt
 # Built binaries
 /instacrawl
 /cmd/instacrawl/instacrawl
+/bin/
 *.exe
 *.out
 # Test & coverage artifacts
