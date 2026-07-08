@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Added
+- Direct-message archiver: `sync` walks the inbox (and message requests),
+  archives each thread with three-way resume so an unchanged thread costs zero
+  fetches on a re-run, and stores messages/threads/participants/reactions/events
+  to SQLite. Idempotent by stable id, cursor advance is transactional with the
+  row upserts, unsends are flagged (never deleted), and unknown message types
+  surface as drift instead of being skipped.
 - Web-session authentication: `auth import | status | logout`. The session
   bundle is stored in the OS keychain, never in plaintext, and cookies are
   redacted from all logs.

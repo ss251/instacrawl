@@ -216,9 +216,16 @@ but stays opt-in / off by default.**
   **1b pending** — needs the owner's real session to close the live gate.)_
   Gate: a live run returns `OK(1)` for self-profile; a corrupted session returns
   `AUTH·CHECKPOINT`, not a crash.
-- **Phase 2 — DM/inbox archiver (web lane, the wedge).** Gate: two runs;
-  run-2 fetches 0 new for unchanged threads (idempotent); every row carries
-  `source='web'`.
+- **Phase 2 — DM/inbox archiver (web lane, the wedge).** _(**2a done** —
+  `internal/dm` (tagged-union model, lenient parsers, schema-versioned cursors,
+  three-way resume, reconciler), `internal/store` DM tables v2 + transactional
+  `CommitThreadPage`, `internal/dmsync` engine (inbox→thread→item with
+  `PageGuard`/`Floor`/cursors, window-bounded unsend detection, pending pass,
+  per-thread drift isolation), `internal/pace`, and the real `sync` command;
+  offline idempotency gate test passes. **2b pending** — retune the guessed
+  `direct_v2` endpoints/fields against the owner's live session.)_ Gate: two
+  runs; run-2 fetches 0 new for unchanged threads (idempotent); every row
+  carries `source='web'`.
 - **Phase 3 — own content + saved + liked.** Gate: counts non-degenerate vs
   known account totals; re-run is a snapshot no-op.
 - **Phase 4 — cache-carve source + reconciler.** Gate: an API-expired (403)
