@@ -3,10 +3,14 @@ package ig
 import "net/url"
 
 // ==========================================================================
-// DM endpoint builders — part of the fragile surface (like endpoints.go). The
-// paths and params are the Phase-2 best guess at Instagram's private direct_v2
-// API, retuned in 2b against a real session. They take PRIMITIVES (not dm
-// cursor types) so this package stays free of any import cycle with internal/dm.
+// DM endpoint builders. LIVE-VALIDATED 2026-07-09 (schema-only probe against a
+// logged-in session): the inbox and thread paths return the expected shapes —
+// inbox → {seq_id, inbox:{threads[], has_older, oldest_cursor}}, thread →
+// {thread:{thread_id, thread_title, is_group, users[], admin_user_ids, items[],
+// has_older, oldest_cursor, last_activity_at}}, item → {item_id, user_id,
+// timestamp, item_type, text}. The media/voice/share/reaction/reply-ref
+// sub-field names still await a media-bearing sample. Builders take PRIMITIVES
+// (not dm cursor types) so this package stays free of any cycle with internal/dm.
 // ==========================================================================
 
 // InboxRequest builds a direct inbox page request. cursor/seqID are empty on the

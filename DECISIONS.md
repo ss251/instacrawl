@@ -213,19 +213,27 @@ but stays opt-in / off by default.**
   fetcher (default), `internal/igmobile` stub (Phase-5), `internal/store` account
   upsert, and `auth import|status|logout`; all built, vetted, and tested offline.
   Transport is **hybrid**: Go-native web is the default, instagrapi is opt-in.
-  **1b pending** — needs the owner's real session to close the live gate.)_
-  Gate: a live run returns `OK(1)` for self-profile; a corrupted session returns
-  `AUTH·CHECKPOINT`, not a crash.
+  **1b shape-validated 2026-07-09** — a live schema-only probe confirmed
+  `/api/v1/users/{id}/info/` returns `{user:{pk, username, full_name, is_private,
+  profile_pic_url}}` exactly as parsed. Full binary end-to-end (auth import →
+  probe) still open; programmatic session extraction is gated by the safety
+  classifier, so it's run by the owner.)_ Gate: a live run returns `OK(1)` for
+  self-profile; a corrupted session returns `AUTH·CHECKPOINT`, not a crash.
 - **Phase 2 — DM/inbox archiver (web lane, the wedge).** _(**2a done** —
   `internal/dm` (tagged-union model, lenient parsers, schema-versioned cursors,
   three-way resume, reconciler), `internal/store` DM tables v2 + transactional
   `CommitThreadPage`, `internal/dmsync` engine (inbox→thread→item with
   `PageGuard`/`Floor`/cursors, window-bounded unsend detection, pending pass,
   per-thread drift isolation), `internal/pace`, and the real `sync` command;
-  offline idempotency gate test passes. **2b pending** — retune the guessed
-  `direct_v2` endpoints/fields against the owner's live session.)_ Gate: two
-  runs; run-2 fetches 0 new for unchanged threads (idempotent); every row
-  carries `source='web'`.
+  offline idempotency gate test passes. **2b shape-validated 2026-07-09** — a
+  live schema-only probe confirmed the inbox/thread endpoints and every parsed
+  field (thread_id, thread_title, is_group, users, admin_user_ids,
+  last_activity_at, items, oldest_cursor, has_older; item_id/user_id/timestamp/
+  item_type/text; pk/username/full_name/profile_pic_url) match the live shapes;
+  no retune needed. Media/reaction/reply sub-fields await a media-bearing sample;
+  full binary end-to-end awaits the owner-run session import.)_ Gate: two runs;
+  run-2 fetches 0 new for unchanged threads (idempotent); every row carries
+  `source='web'`.
 - **Phase 3 — own content + saved + liked.** Gate: counts non-degenerate vs
   known account totals; re-run is a snapshot no-op.
 - **Phase 4 — cache-carve source + reconciler.** Gate: an API-expired (403)

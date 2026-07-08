@@ -1,12 +1,13 @@
 package ig
 
 // ==========================================================================
-// THE FRAGILE FILE. This is the single place that encodes a live guess about
-// Instagram's current API surface. Everything else in this package is a pure
-// state machine over RawResponse and is validated offline against fixtures.
-//
-// When the live gate (1b) reveals the real shape, retune the URL and the
-// required-key contract HERE — the classifier and its tests do not change.
+// THE FRAGILE FILE — the single place that encodes the live Instagram API
+// surface. LIVE-VALIDATED 2026-07-09: /api/v1/users/{id}/info/ returns
+// {user:{pk, username, full_name, is_private, profile_pic_url}, status} exactly
+// as the classifier parses it. Everything else in this package is a pure state
+// machine over RawResponse, validated offline against fixtures. If Instagram
+// changes the shape, retune the URL + required-key contract HERE — the
+// classifier and its tests do not change.
 // ==========================================================================
 
 // WebHost is the web-lane host. The web session's cookies are scoped to

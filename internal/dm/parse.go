@@ -7,12 +7,16 @@ import (
 	"strings"
 )
 
-// The JSON field names/nesting below are the Phase-2 best guess at Instagram's
-// private direct_v2 shapes. They are validated and retuned in 2b against a real
-// session (this is the fragile surface, analogous to ig/endpoints.go).
-// Everything is parsed LENIENTLY — a bad/renamed field degrades to zero rather
-// than failing the whole batch — and RawJSON is retained, so a second future
-// drift can never lose a historical page.
+// The JSON field names/nesting below were LIVE-VALIDATED 2026-07-09 against a
+// logged-in session (schema-only probe): inbox (seq_id, inbox.threads/has_older/
+// oldest_cursor), thread (thread_id, thread_title, is_group, users, admin_user_ids,
+// last_activity_at, items, oldest_cursor, has_older), item (item_id, user_id,
+// timestamp, item_type, text), and user (pk, username, full_name, profile_pic_url)
+// all match. The media/voice/share/reaction (reactions.likes/emojis) and
+// replied_to_message sub-fields await a media-bearing sample, so they remain
+// best-guess. Everything is parsed LENIENTLY — a bad/renamed field degrades to
+// zero rather than failing the whole batch — and RawJSON is retained, so a
+// future drift can never lose a historical page.
 
 // jsonStr accepts a JSON number or string and yields the string form (big-int
 // safe: never routes an id through float64).
