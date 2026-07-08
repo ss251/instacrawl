@@ -29,7 +29,8 @@ type Account struct {
 	FullName      string `json:"full_name"`
 	IsPrivate     bool   `json:"is_private"`
 	ProfilePicURL string `json:"profile_pic_url"`
-	RawJSON       string `json:"-"` // raw probe body, retained for the store's raw_json column
+	MediaCount    int    `json:"media_count"` // advertised own-post total (Phase 3 gate)
+	RawJSON       string `json:"-"`           // raw probe body, retained for the store's raw_json column
 }
 
 // ProbeResult is the full outcome of a read-only probe.

@@ -17,9 +17,11 @@ cookies.txt
 .env
 .env.*
 
-# Fetched media / raw response dumps (may contain private content)
-media/
-raw/
+# Fetched media / raw response dumps (may contain private content).
+# Anchored to the repo root so they only catch an accidental in-repo archive dir
+# — NOT the internal/media source package, which must ship.
+/media/
+/raw/
 *.har
 
 # === Go ===

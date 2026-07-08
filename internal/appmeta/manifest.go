@@ -47,6 +47,9 @@ func DataDir() string {
 // DatabasePath returns the archive SQLite path (~/.instacrawl/instacrawl.db).
 func DatabasePath() string { return filepath.Join(DataDir(), dbFileName) }
 
+// MediaDir returns the content-addressed media directory (~/.instacrawl/media).
+func MediaDir() string { return filepath.Join(DataDir(), "media") }
+
 // ConfigPath returns the config path, honoring INSTACRAWL_CONFIG.
 func ConfigPath() string {
 	if v := os.Getenv(ConfigEnv); v != "" {

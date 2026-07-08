@@ -151,7 +151,7 @@ usage:
 
 commands:
   auth       manage your session: import | status | logout
-  sync       archive your direct messages into the local store
+  sync       archive your DMs and own content (posts, reels, saved, stories)
   metadata   print the crawlkit control manifest (JSON)
   status     print archive status (JSON)
   version    print the version
@@ -164,8 +164,10 @@ auth:
   instacrawl auth logout
 
 sync:
-  instacrawl sync [--include-pending] [--full-recrawl] [--thread <id>]
-                  [--max-inbox-pages N] [--max-thread-pages N]
+  instacrawl sync [--only all|dms|feed] [--full-recrawl] [--no-media]
+                  [--include-pending] [--thread <id>]
+                  [--include-saved] [--include-collections] [--include-stories]
+                  [--include-liked] [--max-feed-pages N]
 
 instacrawl archives ONLY your own logged-in account, stores everything locally,
 and uploads nothing. See README.md and DECISIONS.md.`

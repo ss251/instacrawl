@@ -58,6 +58,7 @@ type profileBody struct {
 		FullName      string `json:"full_name"`
 		IsPrivate     bool   `json:"is_private"`
 		ProfilePicURL string `json:"profile_pic_url"`
+		MediaCount    int    `json:"media_count"`
 	} `json:"user"`
 }
 
@@ -178,6 +179,7 @@ func Classify(resp RawResponse, expectedUserID string) ProbeResult {
 		FullName:      body.User.FullName,
 		IsPrivate:     body.User.IsPrivate,
 		ProfilePicURL: body.User.ProfilePicURL,
+		MediaCount:    body.User.MediaCount,
 		RawJSON:       string(resp.Body),
 	}
 	out.Verdict = reliability.OK(1)

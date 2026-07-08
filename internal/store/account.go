@@ -34,21 +34,39 @@ func (st *Store) UpsertAccount(ctx context.Context, a *ig.Account, source string
 	fetchedAt := clock().UTC().Format(time.RFC3339)
 
 	_, err := st.s.DB().ExecContext(ctx, `
-insert into account (pk, username, full_name, is_private, profile_pic_url, source, fetched_at, raw_json)
-values (?, ?, ?, ?, ?, ?, ?, ?)
+insert into account (pk, username, full_name, is_private, profile_pic_url, media_count, source, fetched_at, raw_json)
+values (?, ?, ?, ?, ?, ?, ?, ?, ?)
 on conflict(pk) do update set
   username        = excluded.username,
   full_name       = excluded.full_name,
   is_private      = excluded.is_private,
   profile_pic_url = excluded.profile_pic_url,
+  media_count     = excluded.media_count,
   source          = excluded.source,
   fetched_at      = excluded.fetched_at,
   raw_json        = excluded.raw_json
-`, a.PK, a.Username, a.FullName, boolToInt(a.IsPrivate), a.ProfilePicURL, source, fetchedAt, a.RawJSON)
+`, a.PK, a.Username, a.FullName, boolToInt(a.IsPrivate), a.ProfilePicURL, a.MediaCount, source, fetchedAt, a.RawJSON)
 	if err != nil {
 		return fmt.Errorf("upsert account %s: %w", a.PK, err)
 	}
 	return nil
+}
+
+// AccountMediaCount returns the advertised own-post total for pk (the Phase 3
+// gate's "known total"), or (0, false) if absent/unknown.
+func (st *Store) AccountMediaCount(ctx context.Context, pk string) (int, bool, error) {
+	var mc sql.NullInt64
+	err := st.s.DB().QueryRowContext(ctx, `select media_count from account where pk = ?`, pk).Scan(&mc)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("account media_count %s: %w", pk, err)
+	}
+	if !mc.Valid {
+		return 0, false, nil
+	}
+	return int(mc.Int64), true, nil
 }
 
 // GetAccount reads an account by pk. The second return is false if absent.

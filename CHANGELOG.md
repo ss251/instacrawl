@@ -3,6 +3,15 @@
 ## [Unreleased]
 
 ### Added
+- Own-content archiver: `sync` now also captures your posts, reels, saved posts,
+  saved collections, and currently-live stories, and downloads the media bytes
+  into a content-addressed store on disk (deduplicated by SHA256; CDN URLs are
+  fetched in the same pass because they expire). Feeds resume incrementally — an
+  unchanged feed costs zero fetches on a re-run — and an expired media URL is
+  flagged missing rather than failing the run. The (usually restricted) liked
+  feed is best-effort: it reports "unavailable" instead of pretending it's empty.
+  Flags: `--only feed`, `--include-saved`, `--include-collections`,
+  `--include-stories`, `--include-liked`, `--no-media`, `--max-feed-pages`.
 - Direct-message archiver: `sync` walks the inbox (and message requests),
   archives each thread with three-way resume so an unchanged thread costs zero
   fetches on a re-run, and stores messages/threads/participants/reactions/events

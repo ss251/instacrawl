@@ -234,8 +234,26 @@ but stays opt-in / off by default.**
   full binary end-to-end awaits the owner-run session import.)_ Gate: two runs;
   run-2 fetches 0 new for unchanged threads (idempotent); every row carries
   `source='web'`.
-- **Phase 3 — own content + saved + liked.** Gate: counts non-degenerate vs
-  known account totals; re-run is a snapshot no-op.
+- **Phase 3 — own content + saved + liked.** _(**3a done** — `internal/feed`
+  (media/story/collection domain, lenient big-int-safe parsers, schema-versioned
+  feed cursors with three-way resume, richness-tiered reconciler), `internal/media`
+  (content-addressed SHA256 byte-downloader, bounded pool, 403→missing, dedup),
+  `internal/store` feed tables v3 + transactional `CommitFeedPage`/`CommitStorySet`,
+  `internal/feedsync` engine (stories-first → own+saved → collections → liked, with
+  `PageGuard`/`Floor`/download-in-pass/per-feed drift isolation), and the `sync`
+  feed flags. Offline gates pass: idempotent re-run is a snapshot no-op, identical
+  bytes dedup to one blob, an expired 403 is flagged missing without failing the
+  run, carousels expand to child rows+blobs, an unknown `media_type` isolates that
+  feed as drift. **3b shape-validated 2026-07-09** — a live schema-only probe
+  confirmed own-feed `/feed/user/{id}/`, saved `/feed/saved/posts/`, collections
+  `/collections/list/`, per-collection `/feed/collection/{id}/posts/`, and stories
+  `/feed/user/{id}/story/` (reel==null = no active story); it caught three wrong
+  guessed paths (`/feed/saved/`, `/feed/collection/{id}/`, and confirmed
+  `/feed/liked/` 400s) before they shipped — saved/collection fixed to `/posts/`,
+  liked handled as first-class "unavailable". `/users/{id}/info/` `media_count`
+  feeds the count gate. Full binary end-to-end awaits the owner-run session
+  import.)_ Gate: counts non-degenerate vs known account totals; re-run is a
+  snapshot no-op.
 - **Phase 4 — cache-carve source + reconciler.** Gate: an API-expired (403)
   media file present in cache is recovered; a carved stub never overwrites a
   richer API row; merge is idempotent.
