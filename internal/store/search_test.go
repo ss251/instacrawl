@@ -84,6 +84,38 @@ func TestSearchCrossEntity(t *testing.T) {
 	}
 }
 
+// --- A DM hit carries its author's @handle (joined from dm_user). ---
+
+func TestSearchIncludesSender(t *testing.T) {
+	ctx := context.Background()
+	st := openTemp(t)
+	seedDMPage(t, st, &dm.ThreadPage{
+		ThreadID: "t1",
+		Thread: &dm.Thread{ThreadID: "t1", Source: "web", Participants: []dm.Participant{
+			{UserID: "42", Username: "alex", FieldCount: 2, Source: "web"},
+		}},
+		Messages: []dm.Message{{ItemID: "i1", ThreadID: "t1", UserID: "42", TimestampUS: 100, ItemType: dm.ItemText, Known: true, Text: "aurora over kyoto"}},
+	})
+	hits, err := st.Search(ctx, "aurora", "dm", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].Sender != "alex" {
+		t.Fatalf("a dm hit must carry the sender @handle: %+v", hits)
+	}
+
+	// A message whose author is not in dm_user resolves to an empty sender — the
+	// left join must not drop the hit or error.
+	seedDM(t, st, "t2", "i2", 100, "aurora with no known sender")
+	got, err := st.Search(ctx, "aurora", "dm", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("both hits must return even when one sender is unknown: %+v", got)
+	}
+}
+
 // --- Ranking: a stronger match sorts first; the snippet brackets the term. ---
 
 func TestSearchRanking(t *testing.T) {

@@ -17,6 +17,7 @@ type SearchHit struct {
 	Entity      string  // "dm" | "media"
 	Key         string  // item_id (dm) | pk (media)
 	ThreadID    string  // dm only
+	Sender      string  // dm only — @username of the message author ("" if unknown)
 	Code        string  // media only (shortcode)
 	TimestampUS int64   // timestamp_us (dm) | taken_at_us (media)
 	Unsent      bool    // dm only — the message was later unsent (retained, flagged)
@@ -82,10 +83,11 @@ func (st *Store) Search(ctx context.Context, terms, entity string, limit int) ([
 
 func (st *Store) searchDMs(ctx context.Context, match string, limit int) ([]SearchHit, error) {
 	rows, err := st.s.DB().QueryContext(ctx, `
-select m.item_id, m.thread_id, m.timestamp_us, m.unsent_observed,
+select m.item_id, m.thread_id, coalesce(u.username, ''), m.timestamp_us, m.unsent_observed,
        snippet(dm_message_fts, 0, '[', ']', '…', 10), bm25(dm_message_fts)
 from dm_message_fts
 join dm_message m on m.rowid = dm_message_fts.rowid
+left join dm_user u on u.user_id = m.user_id
 where dm_message_fts match ?
 order by rank
 limit ?`, match, limit)
@@ -98,7 +100,7 @@ limit ?`, match, limit)
 	for rows.Next() {
 		var h SearchHit
 		var unsent int
-		if err := rows.Scan(&h.Key, &h.ThreadID, &h.TimestampUS, &unsent, &h.Snippet, &h.Score); err != nil {
+		if err := rows.Scan(&h.Key, &h.ThreadID, &h.Sender, &h.TimestampUS, &unsent, &h.Snippet, &h.Score); err != nil {
 			return nil, fmt.Errorf("scan dm hit: %w", err)
 		}
 		h.Entity = "dm"

@@ -115,7 +115,8 @@ func cmdStatus(jsonFlag bool, args []string) error {
 		return err
 	}
 	if format == output.Text {
-		format = output.JSON
+		printStatusHuman(appmeta.BuildStatus())
+		return nil
 	}
 	return output.Write(os.Stdout, format, "status", appmeta.BuildStatus())
 }
