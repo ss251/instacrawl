@@ -1,16 +1,16 @@
-# instacrawl
+# instacrawl 📸
 
 **A local-first CLI that archives _your own_ Instagram data — DMs, posts, reels,
 stories, saved and liked — to a searchable SQLite database on your own disk.**
 
+<p align="center">
+  <img src="docs/demo.gif" alt="Searching an archived Instagram DM history with instacrawl" width="800">
+</p>
+
 Built on [crawlkit](https://github.com/openclaw/crawlkit) and inspired by
 [steipete](https://github.com/steipete)'s local-first crawlers (telecrawl, wacrawl, gitcrawl, discrawl):
-it reuses the session you are already logged into, stores everything locally,
-and uploads nothing.
-
-```
-● local-only   ● no telemetry   ● no uploads   ● your own account only
-```
+it reuses the session you are already logged into, keeps everything local, and
+uploads nothing — no telemetry, no cloud, your own account only.
 
 ## Status
 
