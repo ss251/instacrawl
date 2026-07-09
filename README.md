@@ -133,7 +133,7 @@ go install github.com/ss251/instacrawl/cmd/instacrawl@latest
 go build -o instacrawl ./cmd/instacrawl && ./instacrawl --help
 ```
 
-Requires Go 1.26.4+.
+Requires Go 1.26.5+.
 
 ### Maintainer: one-time tap setup
 
