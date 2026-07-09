@@ -4,7 +4,7 @@ go 1.26.5
 
 require (
 	github.com/browserutils/kooky v0.2.10
-	github.com/openclaw/crawlkit v0.13.4-0.20260706080912-6703bbbb9d87
+	github.com/openclaw/crawlkit v0.13.4
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/net v0.56.0
 )
