@@ -51,7 +51,7 @@ homebrew_casks:
       owner: ss251
       name: homebrew-tap
       branch: main
-      token: "{{ index .Env \"HOMEBREW_TAP_GITHUB_TOKEN\" }}"
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://github.com/ss251/instacrawl"
     description: "Local-first CLI that archives and searches your own Instagram (DMs, posts, stories) to SQLite."
     commit_author:
