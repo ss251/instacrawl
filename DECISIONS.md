@@ -187,8 +187,19 @@ over one field.
 **Two session bundles, one per lane — never mixed:**
 
 - **Web (default):** just the real browser cookie jar
-  (`sessionid` / `ds_user_id` / `csrftoken` / `mid` / `rur`) + a web UA. Nothing
-  fabricated. Imported by cookie paste or browser-harness.
+  (`sessionid` / `ds_user_id` / `csrftoken` / `mid` / `rur` / `ig_did`) + a web
+  UA. Nothing fabricated. Imported by cookie paste/file, or — the zero-friction
+  path — by `--from-browser`, which reads the owner's own instagram.com cookies
+  **directly from the local browser's on-disk store** and decrypts them
+  in-process (`internal/browsercookie`, backed by the pure-Go `kooky`), then hands
+  them straight to the OS keychain. This is the *purest* form of "just the real
+  browser cookie jar, nothing fabricated" — it literally copies the live browser
+  session. Scoped hard: the read is filtered to the `instagram.com` domain AND to
+  those six cookie names (never a general cookie export), the raw value is never
+  printed or logged (only the resolved `@username`), and on macOS a one-time
+  Keychain consent prompt is expected (same mechanism as `yt-dlp
+  --cookies-from-browser`). Supported: chrome/brave/edge/chromium/firefox; Arc and
+  Safari are a documented fast-follow.
 - **Mobile (opt-in):** the full fabricated-device bundle — stable device seed
   (regenerating it re-triggers a checkpoint), rotating `X-IG-WWW-Claim`,
   `Bearer IGT:` token, matched UA + `X-IG-App-ID`.

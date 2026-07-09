@@ -42,7 +42,7 @@ func ParseCookieHeader(raw, acquired string) (*WebBundle, error) {
 		}
 		cookies[strings.ToLower(strings.TrimSpace(name))] = strings.TrimSpace(value)
 	}
-	return bundleFromCookies(cookies, acquired)
+	return BundleFromCookies(cookies, acquired)
 }
 
 // ParseCookiesTxt parses a Netscape cookies.txt body, keeping only
@@ -66,7 +66,7 @@ func ParseCookiesTxt(raw, acquired string) (*WebBundle, error) {
 		value := strings.TrimSpace(fields[6])
 		cookies[name] = value
 	}
-	return bundleFromCookies(cookies, acquired)
+	return BundleFromCookies(cookies, acquired)
 }
 
 // cookieExport is one entry in a Cookie-Editor-style JSON array.
@@ -89,7 +89,7 @@ func ParseJSONExport(raw, acquired string) (*WebBundle, error) {
 		}
 		cookies[strings.ToLower(strings.TrimSpace(e.Name))] = strings.TrimSpace(e.Value)
 	}
-	return bundleFromCookies(cookies, acquired)
+	return BundleFromCookies(cookies, acquired)
 }
 
 // parseBundleJSON parses instacrawl's own {"sessionid":…} bundle dump.
@@ -108,7 +108,13 @@ func parseBundleJSON(raw, acquired string) (*WebBundle, error) {
 	return &b, nil
 }
 
-func bundleFromCookies(cookies map[string]string, acquired string) (*WebBundle, error) {
+// BundleFromCookies is the single mapper from a set of instagram.com cookie
+// name→value pairs to a normalized, validated WebBundle. Every import path — the
+// paste/file/JSON parsers above and the --from-browser reader (internal/
+// browsercookie) — funnels through here, so the "which cookie fills which field"
+// truth lives in exactly one place. Values are stored verbatim (the sessionid is
+// URL-encoded on the wire, which is what Instagram expects).
+func BundleFromCookies(cookies map[string]string, acquired string) (*WebBundle, error) {
 	b := &WebBundle{
 		SessionID: cookies["sessionid"],
 		DSUserID:  cookies["ds_user_id"],

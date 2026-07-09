@@ -53,7 +53,7 @@ type WebBundle struct {
 	WWWClaim string `json:"x_ig_www_claim,omitempty"`
 
 	// Acquired records HOW the bundle was obtained ("paste"|"cookiefile"|"json"
-	// |"env"). Note: this is provenance of the SECRET, deliberately distinct
+	// |"env"|"browser:<name>"). Note: this is provenance of the SECRET, deliberately distinct
 	// from the reliability lane tag source='web' on archived rows — two
 	// different "source" concepts, kept named apart.
 	Acquired   string    `json:"acquired,omitempty"`

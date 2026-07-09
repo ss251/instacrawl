@@ -48,10 +48,12 @@ See [`DECISIONS.md`](./DECISIONS.md) for the full architecture and the phase pla
 ## Usage
 
 ```sh
-# 1. Import the session from your logged-in browser's instagram.com cookies
-#    (Cookie-Editor → JSON, or a cookies.txt export). The cookie value is read
-#    from stdin or a file — never a command-line argument (shell-history leak).
-pbpaste | instacrawl auth import --stdin
+# 1. Import your session. The easy way — read it straight from your logged-in
+#    browser (like yt-dlp --cookies-from-browser). The cookie goes browser →
+#    keychain without ever being printed; macOS asks once to allow the read.
+instacrawl auth import --from-browser auto      # or: --from-browser chrome
+#    Prefer a manual export? Cookie-Editor → JSON (or cookies.txt), then:
+#    pbpaste | instacrawl auth import --stdin
 instacrawl auth status                 # OK — logged in as @you
 
 # 2. Archive

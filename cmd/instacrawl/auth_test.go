@@ -17,7 +17,7 @@ func installAuthStubs(t *testing.T) (stored *map[string]*session.WebBundle) {
 	t.Setenv("HOME", t.TempDir())
 
 	kc := map[string]*session.WebBundle{}
-	origStore, origDelete, origProbe, origStdin := storeBundleFn, deleteBundleFn, probeFn, stdin
+	origStore, origDelete, origProbe, origStdin, origBrowser := storeBundleFn, deleteBundleFn, probeFn, stdin, browserSourceFn
 	storeBundleFn = func(service, account string, b *session.WebBundle) error {
 		kc[service+"/"+account] = b
 		return nil
@@ -27,7 +27,7 @@ func installAuthStubs(t *testing.T) (stored *map[string]*session.WebBundle) {
 		return nil
 	}
 	t.Cleanup(func() {
-		storeBundleFn, deleteBundleFn, probeFn, stdin = origStore, origDelete, origProbe, origStdin
+		storeBundleFn, deleteBundleFn, probeFn, stdin, browserSourceFn = origStore, origDelete, origProbe, origStdin, origBrowser
 	})
 	return &kc
 }

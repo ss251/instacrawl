@@ -164,10 +164,16 @@ commands:
   help       print this help
 
 auth:
-  instacrawl auth import [--from-file <path> | --stdin] [--no-verify]
+  instacrawl auth import [--from-browser chrome|brave|edge|chromium|firefox|auto [--profile <name>]]
+                         [--from-file <path> | --stdin] [--no-verify]
                          [--fetcher web|instagrapi]
   instacrawl auth status [--offline] [--json]
   instacrawl auth logout
+
+  --from-browser reads your logged-in instagram.com session straight from the
+  browser's cookie store (like yt-dlp --cookies-from-browser) — no manual export.
+  The cookie goes browser → OS keychain without ever being printed. macOS may ask
+  once to allow reading the browser's keychain entry; click Allow.
 
 sync:
   instacrawl sync [--only all|dms|feed] [--full-recrawl] [--no-media]

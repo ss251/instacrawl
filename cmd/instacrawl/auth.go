@@ -12,6 +12,7 @@ import (
 	"github.com/openclaw/crawlkit/output"
 
 	"github.com/ss251/instacrawl/internal/appmeta"
+	"github.com/ss251/instacrawl/internal/browsercookie"
 	"github.com/ss251/instacrawl/internal/ig"
 	"github.com/ss251/instacrawl/internal/igmobile"
 	"github.com/ss251/instacrawl/internal/igweb"
@@ -35,6 +36,10 @@ var (
 	deleteBundleFn           = session.DeleteBundle
 	getenvFn                 = os.Getenv
 	stdin          io.Reader = os.Stdin
+	// browserSourceFn reads a logged-in instagram.com session from a local
+	// browser. Indirected so tests exercise the whole --from-browser flow with a
+	// fake, never touching a real browser store or the OS keychain.
+	browserSourceFn = browsercookie.NewKookySource().Find
 )
 
 func newFetcher(kind string) (ig.Fetcher, error) {
@@ -77,25 +82,37 @@ func cmdAuthImport(args []string) error {
 	useStdin := fs.Bool("stdin", false, "read the session/cookies from stdin")
 	noVerify := fs.Bool("no-verify", false, "store without probing (offline import)")
 	fetcher := fs.String("fetcher", "web", "transport: web|instagrapi")
-	browser := fs.String("browser", "", "import from a logged-in browser (not yet implemented)")
+	fromBrowser := fs.String("from-browser", "", "read the session directly from a logged-in browser: chrome|brave|edge|chromium|firefox|auto")
+	profile := fs.String("profile", "", "browser profile to read (use with --from-browser when you have several)")
 	if err := fs.Parse(args); err != nil {
 		return usageError{msg: err.Error()}
 	}
 	if fs.NArg() > 0 {
-		return usageError{msg: "auth import takes no positional arguments — never pass a sessionid on the command line (it leaks into shell history); use --stdin or --from-file"}
+		return usageError{msg: "auth import takes no positional arguments — never pass a sessionid on the command line (it leaks into shell history); use --from-browser, --stdin, or --from-file"}
 	}
-	if strings.TrimSpace(*browser) != "" {
-		return usageError{msg: "--browser import is not implemented in this phase; export your instagram.com cookies and use --from-file or --stdin"}
+	if strings.TrimSpace(*fromBrowser) != "" && (*fromFile != "" || *useStdin) {
+		return usageError{msg: "choose one session source: --from-browser, --from-file, or --stdin"}
 	}
 	_ = useStdin // stdin is the default when --from-file is absent; the flag is accepted for explicitness
 
-	raw, acquired, err := readImportInput(*fromFile)
+	ctx := context.Background()
+
+	var bundle *session.WebBundle
+	var err error
+	if strings.TrimSpace(*fromBrowser) != "" {
+		bundle, err = importFromBrowser(ctx, strings.TrimSpace(*fromBrowser), strings.TrimSpace(*profile))
+	} else {
+		var raw, acquired string
+		raw, acquired, err = readImportInput(*fromFile)
+		if err == nil {
+			bundle, err = session.Parse(raw, acquired)
+			if err != nil {
+				err = fmt.Errorf("parse session: %s", session.Sanitize(err.Error()))
+			}
+		}
+	}
 	if err != nil {
 		return err
-	}
-	bundle, err := session.Parse(raw, acquired)
-	if err != nil {
-		return fmt.Errorf("parse session: %s", session.Sanitize(err.Error()))
 	}
 
 	if *noVerify {
@@ -106,7 +123,6 @@ func cmdAuthImport(args []string) error {
 		return nil
 	}
 
-	ctx := context.Background()
 	pr, perr := probeFn(ctx, *fetcher, bundle)
 	if perr != nil {
 		fmt.Fprintf(os.Stderr, "instacrawl: could not verify session: %s\n", session.Sanitize(perr.Error()))
@@ -121,6 +137,73 @@ func cmdAuthImport(args []string) error {
 	}
 	fmt.Printf("OK — logged in as @%s (ds_user_id=%s). Session saved to the OS keychain.\n", pr.Account.Username, pr.Account.PK)
 	return nil
+}
+
+// importFromBrowser reads a logged-in instagram.com session directly from a local
+// browser store and returns a bundle for the normal probe→save flow. The raw
+// cookie never leaves this process except into the keychain; only the resolved
+// @username is ever printed.
+func importFromBrowser(ctx context.Context, browser, profile string) (*session.WebBundle, error) {
+	if !browsercookie.IsSupported(browser) {
+		return nil, usageError{msg: fmt.Sprintf("unknown --from-browser %q (want %s, or auto)",
+			browser, strings.Join(browsercookie.SupportedBrowsers(), "|"))}
+	}
+	fmt.Fprintln(os.Stderr, "instacrawl: reading your Instagram session from the browser…")
+	fmt.Fprintln(os.Stderr, "  (macOS may ask permission to read the browser's keychain entry — click Allow; this is the same mechanism yt-dlp uses.)")
+
+	cands, err := browserSourceFn(ctx, browser)
+	if err != nil {
+		return nil, fmt.Errorf("read browser cookies: %s", session.Sanitize(err.Error()))
+	}
+	if profile != "" {
+		cands = filterProfile(cands, profile)
+	}
+
+	switch len(cands) {
+	case 0:
+		fmt.Fprintf(os.Stderr, "instacrawl: no logged-in instagram.com session found in %s.\n", browserScope(browser))
+		fmt.Fprintln(os.Stderr, "  Log into Instagram in that browser, or export your cookies and use --from-file.")
+		return nil, errReported
+	case 1:
+		return session.BundleFromCookies(cands[0].Cookies, "browser:"+cands[0].Browser)
+	}
+	// More than one session. If they are all the same account, the list is already
+	// default-profile-first — take the first. If different accounts, make the user pick.
+	if sameAccount(cands) {
+		return session.BundleFromCookies(cands[0].Cookies, "browser:"+cands[0].Browser)
+	}
+	var b strings.Builder
+	b.WriteString("multiple Instagram accounts are logged in; re-run with --from-browser <name> --profile \"<profile>\":")
+	for _, c := range cands {
+		fmt.Fprintf(&b, "\n  %s / %q → ds_user_id=%s", c.Browser, c.Profile, c.DSUserID)
+	}
+	return nil, usageError{msg: b.String()}
+}
+
+func filterProfile(cands []browsercookie.Candidate, profile string) []browsercookie.Candidate {
+	var out []browsercookie.Candidate
+	for _, c := range cands {
+		if c.Profile == profile {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func sameAccount(cands []browsercookie.Candidate) bool {
+	for _, c := range cands[1:] {
+		if c.DSUserID != cands[0].DSUserID {
+			return false
+		}
+	}
+	return true
+}
+
+func browserScope(browser string) string {
+	if browser == "auto" {
+		return strings.Join(browsercookie.SupportedBrowsers(), "/")
+	}
+	return browser
 }
 
 func cmdAuthStatus(jsonFlag bool, args []string) error {

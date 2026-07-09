@@ -3,6 +3,15 @@
 ## [Unreleased]
 
 ### Added
+- Zero-friction session import: `instacrawl auth import --from-browser chrome`
+  (or `auto`) reads your logged-in instagram.com session **straight from the
+  browser's own cookie store** — no Cookie-Editor export, no copy/paste — like
+  `yt-dlp --cookies-from-browser`. The cookie is decrypted in-process and written
+  directly to the OS keychain; it is never printed or logged. Reads are locked to
+  the instagram.com domain and the known session cookies only. Supports
+  chrome/brave/edge/chromium/firefox, auto-detects the browser/profile holding a
+  live session, and disambiguates when multiple accounts are logged in. On macOS
+  a one-time "Allow" keychain prompt is expected.
 - Full-text search: `instacrawl search <terms>` searches your archived message
   text and captions (`--type dm|media|all`, `--limit`, `--json`, `--reindex`),
   backed by SQLite FTS5 indexes kept in sync by triggers. Ranked by relevance,
