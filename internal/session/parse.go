@@ -124,11 +124,30 @@ func BundleFromCookies(cookies map[string]string, acquired string) (*WebBundle, 
 		IGDID:     cookies["ig_did"],
 		Acquired:  acquired,
 	}
+	// Carry every OTHER instagram.com cookie (datr, ps_l, …) as Extra — the web
+	// lane is the real browser cookie jar, and some endpoints (direct messages)
+	// require cookies the named set omits.
+	for name, value := range cookies {
+		if namedCookie[name] || strings.TrimSpace(value) == "" {
+			continue
+		}
+		if b.Extra == nil {
+			b.Extra = map[string]string{}
+		}
+		b.Extra[name] = value
+	}
 	b.Normalize()
 	if err := b.Validate(); err != nil {
 		return nil, err
 	}
 	return b, nil
+}
+
+// namedCookie is the set of cookies that map to dedicated WebBundle fields;
+// everything else instagram.com sets goes into Extra.
+var namedCookie = map[string]bool{
+	"sessionid": true, "ds_user_id": true, "csrftoken": true,
+	"mid": true, "rur": true, "ig_did": true,
 }
 
 func looksLikeNetscape(raw string) bool {

@@ -81,6 +81,34 @@ entries (owner's own media only) become `carvefs/testdata` and the extractor is
 built against them. Until then `--format=chromium|indexeddb` refuse loudly and
 the walker is the only active source.
 
+### 2026-07-09 — FULL LIVE END-TO-END (not just schema probes)
+The web lane ran against live Instagram for real (session imported via
+`--from-browser chrome` → keychain; owner @sailesh1618): **auth OK → DM sync
+archived 80 threads / 2,547 messages → search found them** (incl. the thread
+with Eric Manganaro, 61 messages). Three real bugs surfaced and were fixed —
+each caught by the reliability spine, never by silent corruption:
+
+1. **Missing `datr` cookie.** The self-profile endpoint accepted a 6-cookie
+   bundle, but `/direct_v2/inbox/` returned an HTML login wall. The browser's
+   full instagram.com jar carries `datr` (httpOnly, Meta browser-identity) which
+   the DM endpoint requires and the lenient profile endpoint does not. Fix: the
+   web bundle now carries the WHOLE instagram.com cookie jar (`WebBundle.Extra`),
+   not a hand-picked six — the web lane is "the real browser cookie jar."
+2. **Wrong pending-inbox path.** `/api/v1/direct_v2/pending_inbox/` and
+   `/spam_inbox/` **404 on web** (mobile-API paths). The web serves message
+   requests from the same `/inbox/` path with **`?folder=pending`**. The 404
+   HTML page's `not-logged-in` class made the gate read it as AUTH·CHECKPOINT and
+   halt the whole run. Fix: correct path + the pending walk is now best-effort
+   (an optional sub-resource can't halt the main archive).
+3. **Unknown DM item types.** Real inboxes are full of `clip` (shared Reels —
+   the 2nd most common type after `text`) and `video_call_event`, neither in
+   `KnownItemTypes`, so nearly every thread drifted. Fix: added both (clip →
+   shared-media payload, video_call_event → thread event). Also completed the
+   spine's §4B intent: an unknown item_type now **commits the page leniently**
+   (each unknown item stored `item_type_known=0` + `raw_json`) and flags the
+   thread, instead of dropping the page — so nothing is lost and re-parsing after
+   adding a type recovers it without re-fetching.
+
 ### Method notes
 - `ds_user_id` and `sessionid` are httpOnly (not in `document.cookie`); read them
   via CDP `Network.getCookies` when needed. The authenticated `fetch` sends them

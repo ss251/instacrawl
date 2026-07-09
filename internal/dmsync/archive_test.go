@@ -26,7 +26,7 @@ func (f *replayFetcher) FetchSelfProfile(context.Context, *session.WebBundle) (i
 }
 func (f *replayFetcher) Fetch(_ context.Context, _ *session.WebBundle, req ig.Request) (ig.RawResponse, error) {
 	switch {
-	case strings.Contains(req.Path, "/pending_inbox/"):
+	case req.Query.Get("folder") == "pending":
 		f.pendCalls++
 	case strings.Contains(req.Path, "/inbox/"):
 		f.inboxCalls++
@@ -130,25 +130,43 @@ func TestCheckpointHaltsRun(t *testing.T) {
 	}
 }
 
-// --- Per-thread drift is isolated; the run continues. ---
+// --- An unknown item_type is flagged as drift, but the message is RETAINED
+//     (committed leniently with item_type_known=0 + raw_json), never lost. ---
 
-func TestUnknownItemTypeIsolatesThread(t *testing.T) {
+func TestUnknownItemTypeRetainsAndFlags(t *testing.T) {
+	ctx := context.Background()
+	st := tempStore(t)
 	inbox := `{"seq_id":1,"inbox":{"has_older":false,"threads":[
 	  {"thread_id":"T1","last_activity_at":200,"users":[{"pk":5,"username":"bob"}]}]}}`
+	// A page mixing a known text item and a brand-new type.
 	thread := `{"thread":{"thread_id":"T1","has_older":false,"users":[{"pk":5,"username":"bob"}],
-	  "items":[{"item_id":"i1","user_id":5,"timestamp":200,"item_type":"a_brand_new_type"}]}}`
+	  "items":[
+	    {"item_id":"i2","user_id":5,"timestamp":200,"item_type":"a_brand_new_type"},
+	    {"item_id":"i1","user_id":5,"timestamp":190,"item_type":"text","text":"hi"}]}}`
 	f := &replayFetcher{respond: func(req ig.Request) ig.RawResponse {
 		if strings.Contains(req.Path, "/threads/") {
 			return jsonResp(thread)
 		}
 		return jsonResp(inbox)
 	}}
-	s, err := Archive(context.Background(), deps(f, tempStore(t)))
+	s, err := Archive(ctx, deps(f, st))
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The thread is flagged as drift (so the new type gets surfaced)…
 	if s.State != "SCHEMA·DRIFT" || len(s.DriftedThreads) != 1 || s.DriftedThreads[0] != "T1" {
-		t.Fatalf("unknown item_type should isolate the thread as drift: %+v", s)
+		t.Fatalf("unknown item_type should flag the thread as drift: %+v", s)
+	}
+	// …but BOTH messages are retained, not dropped.
+	if s.MessagesNew != 2 {
+		t.Fatalf("an unknown-type page must be committed, not dropped: MessagesNew=%d", s.MessagesNew)
+	}
+	var known int
+	if err := st.DB().QueryRowContext(ctx, `select item_type_known from dm_message where item_id='i2'`).Scan(&known); err != nil {
+		t.Fatalf("the unknown-type message must be stored: %v", err)
+	}
+	if known != 0 {
+		t.Fatal("the unknown-type message must be stored with item_type_known=0")
 	}
 }
 
@@ -216,7 +234,7 @@ func TestPendingInboxIncluded(t *testing.T) {
 	  "items":[{"item_id":"p1","user_id":9,"timestamp":50,"item_type":"text","text":"let me in"}]}}`
 	f := &replayFetcher{respond: func(req ig.Request) ig.RawResponse {
 		switch {
-		case strings.Contains(req.Path, "/pending_inbox/"):
+		case req.Query.Get("folder") == "pending":
 			return jsonResp(pending)
 		case strings.Contains(req.Path, "/threads/"):
 			return jsonResp(thread)

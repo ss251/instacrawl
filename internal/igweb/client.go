@@ -147,6 +147,11 @@ func (c *Client) seedCookies(u *url.URL, b *session.WebBundle) {
 	add("mid", b.Mid)
 	add("rur", b.Rur)
 	add("ig_did", b.IGDID)
+	// The rest of the real browser cookie jar (datr, …) — some endpoints (direct
+	// messages) reject the session without them.
+	for name, value := range b.Extra {
+		add(name, value)
+	}
 	c.httpClient.Jar.SetCookies(u, cookies)
 }
 

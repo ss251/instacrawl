@@ -31,14 +31,19 @@ func InboxRequest(cursor, seqID string) Request {
 }
 
 // PendingInboxRequest builds a message-requests (pending) inbox page request.
+// LIVE-VALIDATED 2026-07-09: the web API serves message requests from the SAME
+// /inbox/ path with folder=pending — the standalone /pending_inbox/ and
+// /spam_inbox/ paths return 404 on www.instagram.com (they are mobile-API paths).
 func PendingInboxRequest(cursor string) Request {
 	q := url.Values{}
 	q.Set("visual_message_return_type", "unseen")
 	q.Set("thread_message_limit", "20")
+	q.Set("folder", "pending")
+	q.Set("limit", "20")
 	if cursor != "" {
 		q.Set("cursor", cursor)
 	}
-	return Request{Method: "GET", Path: "/api/v1/direct_v2/pending_inbox/", Query: q}
+	return Request{Method: "GET", Path: "/api/v1/direct_v2/inbox/", Query: q}
 }
 
 // ThreadRequest builds one backward page of a thread's messages. oldestCursor is

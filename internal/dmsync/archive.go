@@ -46,14 +46,15 @@ type Deps struct {
 
 // Summary reports the outcome of a run.
 type Summary struct {
-	InboxThreads   int
-	ThreadsFetched int
-	ThreadsSkipped int
-	MessagesNew    int
-	State          string // "OK" | terminal state name
-	Reason         string
-	ChallengeURL   string
-	DriftedThreads []string
+	InboxThreads       int
+	ThreadsFetched     int
+	ThreadsSkipped     int
+	MessagesNew        int
+	State              string // "OK" | terminal state name
+	Reason             string
+	ChallengeURL       string
+	DriftedThreads     []string
+	PendingUnavailable bool // the optional message-requests inbox could not be read
 }
 
 // terminal carries a run-halting verdict.
@@ -106,9 +107,14 @@ func Archive(ctx context.Context, d Deps) (Summary, error) {
 				return sum, err
 			}
 			if pterm != nil {
-				return terminalSummary(sum, pterm), nil
+				// The pending/requests inbox is OPTIONAL. The main inbox already
+				// succeeded, so a terminal here is endpoint-specific (e.g. the
+				// account has no requests folder), NOT a bad session — record it and
+				// keep archiving the main threads rather than halting the whole run.
+				sum.PendingUnavailable = true
+			} else {
+				threads = append(threads, pending...)
 			}
-			threads = append(threads, pending...)
 		}
 	}
 	sum.InboxThreads = len(threads)
@@ -138,7 +144,7 @@ func Archive(ctx context.Context, d Deps) (Summary, error) {
 	sum.MessagesNew = after - before
 	if len(sum.DriftedThreads) > 0 {
 		sum.State = reliability.StateSchemaDrift.String()
-		sum.Reason = fmt.Sprintf("%d thread(s) hit schema drift and were skipped; raw retained", len(sum.DriftedThreads))
+		sum.Reason = fmt.Sprintf("%d thread(s) carried unrecognized item type(s) — their messages were retained (raw kept, flagged) so re-parsing after adding the types loses nothing", len(sum.DriftedThreads))
 	}
 	return sum, nil
 }
@@ -210,6 +216,7 @@ func archiveThread(ctx context.Context, d Deps, th dm.Thread) (threadOutcome, er
 	}
 	newest := prev
 	firstPage := true
+	var drifted *reliability.Verdict // set once a page carries an unknown item_type
 
 	for {
 		resp, err := d.Fetcher.Fetch(ctx, d.Bundle, ig.ThreadRequest(th.ThreadID, cursor))
@@ -225,33 +232,44 @@ func archiveThread(ctx context.Context, d Deps, th dm.Thread) (threadOutcome, er
 
 		switch tr.Verdict.State {
 		case reliability.StateOK:
-			newCur := advanceCursor(newest, tr.Page, firstPage)
-			if err := d.Store.CommitThreadPage(ctx, tr.Page, newCur); err != nil {
-				return threadOutcome{}, err
-			}
-			newest = newCur
-			firstPage = false
-
-			if res == dm.Grew && reachedStop(tr.Page, stopAt) {
-				return threadOutcome{}, nil // caught up to the known head
-			}
-			// proceed=false means fully backfilled (empty cursor), the page
-			// cap, or a non-advancing cursor — all bounded stops for this
-			// thread, not run failures.
-			proceed, guardErr := guard.Next(tr.Page.OldestCursor)
-			if !proceed {
-				_ = guardErr
-				return threadOutcome{}, nil
-			}
-			cursor = tr.Page.OldestCursor
-			if err := d.Pacer.Wait(ctx); err != nil {
-				return threadOutcome{}, err
-			}
+			// commit below
 		case reliability.StateSchemaDrift:
+			if tr.Page == nil {
+				// Structural drift — the page could not be parsed at all, so there
+				// is nothing safe to commit. Isolate this thread, continue others.
+				v := tr.Verdict
+				return threadOutcome{drift: &v}, nil
+			}
+			// Unknown item_type: the page parsed leniently — each unknown item is
+			// stored with item_type_known=0 and its raw_json — so committing loses
+			// nothing and a later parser re-derives it from raw (DECISIONS §4B).
+			// Flag the thread as drifted (to surface the new type) but keep paging.
 			v := tr.Verdict
-			return threadOutcome{drift: &v}, nil // isolate this thread, continue others
+			drifted = &v
 		default: // AUTH·CHECKPOINT / RATE·LIMITED → halt whole run
 			return threadOutcome{terminal: &terminal{verdict: tr.Verdict, challengeURL: tr.ChallengeURL}}, nil
+		}
+
+		newCur := advanceCursor(newest, tr.Page, firstPage)
+		if err := d.Store.CommitThreadPage(ctx, tr.Page, newCur); err != nil {
+			return threadOutcome{}, err
+		}
+		newest = newCur
+		firstPage = false
+
+		if res == dm.Grew && reachedStop(tr.Page, stopAt) {
+			return threadOutcome{drift: drifted}, nil // caught up to the known head
+		}
+		// proceed=false means fully backfilled (empty cursor), the page cap, or a
+		// non-advancing cursor — all bounded stops for this thread, not failures.
+		proceed, guardErr := guard.Next(tr.Page.OldestCursor)
+		if !proceed {
+			_ = guardErr
+			return threadOutcome{drift: drifted}, nil
+		}
+		cursor = tr.Page.OldestCursor
+		if err := d.Pacer.Wait(ctx); err != nil {
+			return threadOutcome{}, err
 		}
 	}
 }

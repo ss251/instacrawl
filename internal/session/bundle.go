@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -51,6 +52,15 @@ type WebBundle struct {
 	// back (no echo loop yet — that is Phase 2). The field exists now so Phase 2
 	// does not reshape the type.
 	WWWClaim string `json:"x_ig_www_claim,omitempty"`
+
+	// Extra holds any OTHER instagram.com cookies from the same session that are
+	// not one of the named fields above — most importantly `datr` (the httpOnly
+	// Meta browser-identity cookie that authenticated web endpoints like direct
+	// messages require, but the lenient self-profile endpoint does not). The web
+	// lane is "just the real browser cookie jar"; carrying the whole jar (all
+	// instagram.com cookies, and only those) makes it robust to which cookie a
+	// given endpoint happens to check. Secret-adjacent: values are never logged.
+	Extra map[string]string `json:"extra,omitempty"`
 
 	// Acquired records HOW the bundle was obtained ("paste"|"cookiefile"|"json"
 	// |"env"|"browser:<name>"). Note: this is provenance of the SECRET, deliberately distinct
@@ -142,6 +152,9 @@ type RedactedBundle struct {
 	HasRur       bool      `json:"has_rur"`
 	HasIGDID     bool      `json:"has_ig_did"`
 	HasWWWClaim  bool      `json:"has_x_ig_www_claim"`
+	// ExtraCookies lists the NAMES of additional session cookies carried (e.g.
+	// "datr"), never their values.
+	ExtraCookies []string `json:"extra_cookies,omitempty"`
 }
 
 // Redacted returns the secret-free projection.
@@ -158,7 +171,21 @@ func (b *WebBundle) Redacted() RedactedBundle {
 		HasRur:       strings.TrimSpace(b.Rur) != "",
 		HasIGDID:     strings.TrimSpace(b.IGDID) != "",
 		HasWWWClaim:  strings.TrimSpace(b.WWWClaim) != "",
+		ExtraCookies: extraCookieNames(b.Extra),
 	}
+}
+
+// extraCookieNames returns the sorted names (never values) of the extra cookies.
+func extraCookieNames(extra map[string]string) []string {
+	if len(extra) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(extra))
+	for name := range extra {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // String renders the bundle without any secret value. This is the ONLY way a

@@ -10,8 +10,9 @@
 // session.BundleFromCookies → the OS keychain, and are never printed or logged.
 //
 // Scope is locked to the legitimate use — the owner's OWN instagram.com session:
-// reads are filtered to the instagram.com domain AND to the six known session
-// cookie names, so this is never a general-purpose cookie exporter.
+// reads are filtered to the instagram.com domain (the whole session cookie jar,
+// exactly what the browser itself sends to Instagram — nothing from any other
+// site), so this is never a general-purpose cookie exporter.
 package browsercookie
 
 import (
@@ -35,14 +36,6 @@ import (
 // preference order. Chrome is first because the owner drives it (browser-harness
 // attaches to Chrome), so it is the likeliest host of a live session.
 var supportedBrowsers = []string{"chrome", "brave", "edge", "chromium", "firefox"}
-
-// igCookieNames are the instagram.com cookies the web fetcher replays
-// (internal/igweb seeds exactly these). Only these ever leave the browser store —
-// the read is name-scoped as well as domain-scoped, so nothing else is exposed.
-var igCookieNames = map[string]bool{
-	"sessionid": true, "ds_user_id": true, "csrftoken": true,
-	"mid": true, "rur": true, "ig_did": true,
-}
 
 // Candidate is one (browser, profile) that holds a logged-in instagram.com
 // session. Cookies carries the SECRET; it exists only to be handed to
@@ -149,12 +142,11 @@ func readCandidate(ctx context.Context, store kooky.CookieStore, browser string)
 	if err != nil || len(cookies) == 0 {
 		return Candidate{}, false
 	}
-	m := make(map[string]string, len(igCookieNames))
+	// Carry the whole instagram.com jar (sessionid, datr, …) — the same set the
+	// browser sends to Instagram — so every endpoint the session can reach works.
+	m := make(map[string]string, len(cookies))
 	for _, c := range cookies {
-		name := strings.ToLower(c.Name)
-		if igCookieNames[name] {
-			m[name] = c.Value
-		}
+		m[strings.ToLower(c.Name)] = c.Value
 	}
 	if strings.TrimSpace(m["sessionid"]) == "" {
 		return Candidate{}, false

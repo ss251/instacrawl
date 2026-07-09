@@ -17,19 +17,22 @@ const (
 	ItemMediaShare    ItemType = "media_share"
 	ItemReelShare     ItemType = "reel_share"
 	ItemStoryShare    ItemType = "story_share"
+	ItemClip          ItemType = "clip" // a shared Reel/clip — the most common share in modern DMs
 	ItemLink          ItemType = "link"
 	ItemLike          ItemType = "like"
 	ItemAnimatedMedia ItemType = "animated_media"
 	ItemPlaceholder   ItemType = "placeholder"
 	ItemActionLog     ItemType = "action_log"
+	ItemVideoCall     ItemType = "video_call_event" // a voice/video call log entry
 )
 
 // KnownItemTypes is the closed set the parser recognizes. Anything outside it is
-// drift, not a skip.
+// drift, not a skip — that is how a genuinely new type gets surfaced (clip and
+// video_call_event were added this way after a live run flagged them).
 var KnownItemTypes = map[ItemType]bool{
 	ItemText: true, ItemMedia: true, ItemVoice: true, ItemMediaShare: true,
-	ItemReelShare: true, ItemStoryShare: true, ItemLink: true, ItemLike: true,
-	ItemAnimatedMedia: true, ItemPlaceholder: true, ItemActionLog: true,
+	ItemReelShare: true, ItemStoryShare: true, ItemClip: true, ItemLink: true, ItemLike: true,
+	ItemAnimatedMedia: true, ItemPlaceholder: true, ItemActionLog: true, ItemVideoCall: true,
 }
 
 // Message is one direct message, a tagged union over ItemType. Only the

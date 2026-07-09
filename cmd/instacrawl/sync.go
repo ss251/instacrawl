@@ -90,8 +90,12 @@ func cmdSync(args []string) error {
 		if sum.State != "OK" {
 			return reportTerminal("dms", sum.State, sum.Reason, sum.ChallengeURL)
 		}
-		fmt.Printf("DMs — %d thread(s): %d archived, %d unchanged; %d new message(s).\n",
-			sum.InboxThreads, sum.ThreadsFetched, sum.ThreadsSkipped, sum.MessagesNew)
+		pending := ""
+		if sum.PendingUnavailable {
+			pending = " (message-requests inbox unavailable)"
+		}
+		fmt.Printf("DMs — %d thread(s): %d archived, %d unchanged; %d new message(s)%s.\n",
+			sum.InboxThreads, sum.ThreadsFetched, sum.ThreadsSkipped, sum.MessagesNew, pending)
 	}
 
 	if doFeed {

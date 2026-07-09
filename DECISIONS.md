@@ -259,8 +259,15 @@ but stays opt-in / off by default.**
   field (thread_id, thread_title, is_group, users, admin_user_ids,
   last_activity_at, items, oldest_cursor, has_older; item_id/user_id/timestamp/
   item_type/text; pk/username/full_name/profile_pic_url) match the live shapes;
-  no retune needed. Media/reaction/reply sub-fields await a media-bearing sample;
-  full binary end-to-end awaits the owner-run session import.)_ Gate: two runs;
+  no retune needed. **Full binary end-to-end CLOSED 2026-07-09** — a real live
+  run (session via `--from-browser`) archived 80 threads / 2,547 messages and
+  they were searchable. It surfaced three real bugs the spine caught (not silent
+  corruption): the DM endpoint needs the whole cookie jar incl. `datr` (fixed:
+  `WebBundle.Extra` carries the full instagram.com jar); the web pending inbox is
+  `/inbox/?folder=pending`, not `/pending_inbox/` (fixed + made best-effort); and
+  real DMs use `clip`/`video_call_event` item types (fixed), which also completed
+  the §4B contract — an unknown item_type now commits leniently + flags rather
+  than dropping the page. See `recon/live-validation.md`.)_ Gate: two runs;
   run-2 fetches 0 new for unchanged threads (idempotent); every row carries
   `source='web'`.
 - **Phase 3 — own content + saved + liked.** _(**3a done** — `internal/feed`

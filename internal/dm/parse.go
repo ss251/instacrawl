@@ -78,6 +78,7 @@ type itemJSON struct {
 	MediaShare json.RawMessage `json:"media_share"`
 	ReelShare  json.RawMessage `json:"reel_share"`
 	StoryShare json.RawMessage `json:"story_share"`
+	Clip       json.RawMessage `json:"clip"`
 	Link       json.RawMessage `json:"link"`
 	Reactions  *struct {
 		Likes  []reactionJSON `json:"likes"`
@@ -122,7 +123,7 @@ func messageFrom(it itemJSON, threadID, source string, raw json.RawMessage) (Mes
 		Known:       known,
 		Text:        it.Text,
 		MediaJSON:   rawStr(it.Media),
-		SharedJSON:  firstNonEmpty(rawStr(it.MediaShare), rawStr(it.ReelShare), rawStr(it.StoryShare)),
+		SharedJSON:  firstNonEmpty(rawStr(it.MediaShare), rawStr(it.ReelShare), rawStr(it.StoryShare), rawStr(it.Clip)),
 		LinkJSON:    rawStr(it.Link),
 		RawJSON:     string(raw),
 		Source:      source,
@@ -138,12 +139,14 @@ func messageFrom(it itemJSON, threadID, source string, raw json.RawMessage) (Mes
 			m.Reactions = append(m.Reactions, Reaction{ItemID: m.ItemID, UserID: string(r.SenderID), Emoji: r.Emoji, TimestampUS: int64(r.Timestamp)})
 		}
 	}
+	// action_log and video_call_event are thread-level events (not conversational
+	// messages), projected into the events table for a timeline view.
 	var ev *ThreadEvent
-	if itype == ItemActionLog {
+	if itype == ItemActionLog || itype == ItemVideoCall {
 		ev = &ThreadEvent{
 			EventID:     m.ItemID,
 			ThreadID:    threadID,
-			Kind:        "action_log",
+			Kind:        string(itype),
 			ActorID:     m.UserID,
 			TimestampUS: m.TimestampUS,
 			RawJSON:     string(raw),

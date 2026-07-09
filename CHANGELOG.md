@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Fixed
+- Direct messages now archive against live Instagram (validated end to end). Three
+  issues the reliability gate caught on the first real run: the web session now
+  carries the full instagram.com cookie jar (the DM endpoint needs `datr`, which
+  the self-profile endpoint doesn't); the message-requests inbox uses
+  `/inbox/?folder=pending` (the old `/pending_inbox/` path 404s on web) and is now
+  best-effort so it can't halt the main archive; and the `clip` (shared Reels) and
+  `video_call_event` message types are recognized. An unrecognized message type is
+  now stored (flagged, with its raw JSON) instead of dropping the page, so adding
+  the type later re-parses it with no re-fetch.
+
 ### Added
 - Zero-friction session import: `instacrawl auth import --from-browser chrome`
   (or `auto`) reads your logged-in instagram.com session **straight from the
