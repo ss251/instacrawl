@@ -265,11 +265,18 @@ but stays opt-in / off by default.**
   corruption): the DM endpoint needs the whole cookie jar incl. `datr` (fixed:
   `WebBundle.Extra` carries the full instagram.com jar); the web pending inbox is
   `/inbox/?folder=pending`, not `/pending_inbox/` (fixed + made best-effort); and
-  real DMs use `clip`/`video_call_event` item types (fixed), which also completed
-  the §4B contract — an unknown item_type now commits leniently + flags rather
-  than dropping the page. See `recon/live-validation.md`.)_ Gate: two runs;
-  run-2 fetches 0 new for unchanged threads (idempotent); every row carries
-  `source='web'`.
+  real DMs use `clip`/`video_call_event`/`raven_media`/`profile` item types
+  (each confirmed from retained raw before parse handling, never guessed), which
+  also completed the §4B contract — an unknown item_type now commits leniently +
+  flags rather than dropping the page. Two follow-ups closed the lane: **backfill
+  now resumes across runs** (a thread carries independent head + tail frontiers,
+  each advanced by its own crawl phase, so a page-capped run's leftover deep
+  history is picked up next run instead of being skipped or clobbered), and the
+  new **`instacrawl reparse`** verb re-decodes drifted messages from retained raw
+  with no network — on the live archive it recovered 16/16 and drove
+  `unknown_messages` to 0. See `recon/live-validation.md`.)_ Gate: two runs;
+  run-2 fetches 0 new for unchanged fully-backfilled threads (idempotent); every
+  row carries `source='web'`.
 - **Phase 3 — own content + saved + liked.** _(**3a done** — `internal/feed`
   (media/story/collection domain, lenient big-int-safe parsers, schema-versioned
   feed cursors with three-way resume, richness-tiered reconciler), `internal/media`

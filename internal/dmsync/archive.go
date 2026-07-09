@@ -16,6 +16,8 @@ package dmsync
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/ss251/instacrawl/internal/dm"
 	"github.com/ss251/instacrawl/internal/ig"
@@ -144,7 +146,11 @@ func Archive(ctx context.Context, d Deps) (Summary, error) {
 	sum.MessagesNew = after - before
 	if len(sum.DriftedThreads) > 0 {
 		sum.State = reliability.StateSchemaDrift.String()
-		sum.Reason = fmt.Sprintf("%d thread(s) carried unrecognized item type(s) — their messages were retained (raw kept, flagged) so re-parsing after adding the types loses nothing", len(sum.DriftedThreads))
+		types := ""
+		if m, terr := d.Store.UnknownMessageTypes(ctx); terr == nil && len(m) > 0 {
+			types = " [" + formatUnknownTypes(m) + "]"
+		}
+		sum.Reason = fmt.Sprintf("%d thread(s) carried unrecognized item type(s)%s — messages retained (raw kept, flagged); add the types and run `instacrawl reparse` to recover them without re-fetching", len(sum.DriftedThreads), types)
 	}
 	return sum, nil
 }
@@ -189,7 +195,24 @@ func walkInbox(ctx context.Context, d Deps, pending bool) ([]dm.Thread, *termina
 	return threads, nil, nil
 }
 
-// archiveThread crawls one thread backwards with three-way resume.
+// advanceMode selects which cursor frontier a committed page advances. A thread
+// has two INDEPENDENT frontiers — the newest-message anchor (head) and the
+// backward-backfill cursor (tail) — so a head catch-up must not clobber the
+// backfill frontier, and vice-versa.
+type advanceMode int
+
+const (
+	advanceFull advanceMode = iota // fresh crawl: track both frontiers (head→bottom in one pass)
+	advanceHead                    // head catch-up: track only the newest anchor
+	advanceTail                    // backfill continuation: track only the oldest frontier
+)
+
+// archiveThread crawls one thread with three-way resume across TWO frontiers.
+// A fresh/invalidated thread is crawled head→bottom in one pass. A resumed
+// thread is handled in up to two phases: a head catch-up (fetch messages newer
+// than the stored anchor) and a tail backfill (continue from the stored
+// backward frontier toward the start of the thread). The zero-fetch win holds
+// only for a thread with no new activity that is ALSO fully backfilled.
 func archiveThread(ctx context.Context, d Deps, th dm.Thread) (threadOutcome, error) {
 	prev, ok, err := d.Store.GetThreadCursor(ctx, th.ThreadID)
 	if err != nil {
@@ -199,8 +222,11 @@ func archiveThread(ctx context.Context, d Deps, th dm.Thread) (threadOutcome, er
 	if d.FullRecrawl {
 		res = dm.Invalidated
 	}
-	if res == dm.Unchanged {
-		return threadOutcome{skipped: true}, nil // the idempotency win: zero fetches
+	// The only zero-fetch case: no new activity AND already fully backfilled. A
+	// partially-backfilled thread must continue its backfill even when the head
+	// has not moved (this is the bug the two-frontier model fixes).
+	if res == dm.Unchanged && prev.Backfilled {
+		return threadOutcome{skipped: true}, nil
 	}
 
 	hasHistory, err := d.Store.ThreadHasHistory(ctx, th.ThreadID)
@@ -208,24 +234,64 @@ func archiveThread(ctx context.Context, d Deps, th dm.Thread) (threadOutcome, er
 		return threadOutcome{}, err
 	}
 
-	guard := reliability.NewPageGuard(d.MaxThreadPages)
-	cursor := ""
-	stopAt := ""
-	if res == dm.Grew {
-		stopAt = prev.NewestItemID
+	var drifted *reliability.Verdict
+	cur := prev
+
+	// Phase 1 — head. Invalidated crawls the whole history (advanceFull); Grew
+	// fetches only the new tail down to the known anchor (advanceHead), leaving
+	// the backfill frontier untouched. Unchanged skips phase 1.
+	switch res {
+	case dm.Invalidated:
+		c, out, err := pagePhase(ctx, d, th, "", "", hasHistory, dm.ThreadCursor{}, advanceFull, &drifted)
+		if err != nil || out.terminal != nil || out.drift != nil {
+			return out, err
+		}
+		cur = c
+	case dm.Grew:
+		c, out, err := pagePhase(ctx, d, th, "", prev.NewestItemID, hasHistory, cur, advanceHead, &drifted)
+		if err != nil || out.terminal != nil || out.drift != nil {
+			return out, err
+		}
+		cur = c
 	}
-	newest := prev
+
+	// Phase 2 — tail backfill. Resume from the stored frontier toward the start,
+	// for a Grew or Unchanged thread not yet fully backfilled. Invalidated already
+	// went to the bottom in phase 1 (or hit the page cap; the next run resumes it
+	// as Unchanged/Grew), so it never double-spends the budget here.
+	if res != dm.Invalidated && !cur.Backfilled {
+		c, out, err := pagePhase(ctx, d, th, cur.OldestCursor, "", hasHistory, cur, advanceTail, &drifted)
+		if err != nil || out.terminal != nil || out.drift != nil {
+			return out, err
+		}
+		cur = c
+	}
+
+	return threadOutcome{drift: drifted}, nil
+}
+
+// pagePhase crawls one range of a thread backward from startCursor, committing
+// each page. It stops at stopAtItemID (a head catch-up, when that already-stored
+// id appears in the page) or at the natural bottom / page cap (a backfill).
+// mode selects which cursor frontier the commits advance. The returned outcome
+// is non-empty ONLY for a run-halting terminal or a structural (unparseable)
+// drift; an unknown-item-type drift is recorded via drifted and does not stop
+// the crawl (the page is still committed, its unknown items flagged + raw-kept).
+func pagePhase(ctx context.Context, d Deps, th dm.Thread, startCursor, stopAtItemID string,
+	hasHistory bool, cur dm.ThreadCursor, mode advanceMode, drifted **reliability.Verdict,
+) (dm.ThreadCursor, threadOutcome, error) {
+	guard := reliability.NewPageGuard(d.MaxThreadPages)
+	cursor := startCursor
 	firstPage := true
-	var drifted *reliability.Verdict // set once a page carries an unknown item_type
 
 	for {
 		resp, err := d.Fetcher.Fetch(ctx, d.Bundle, ig.ThreadRequest(th.ThreadID, cursor))
 		if err != nil {
-			return threadOutcome{}, fmt.Errorf("%s thread %s transport failure: %s", d.Fetcher.Name(), th.ThreadID, session.Sanitize(err.Error()))
+			return cur, threadOutcome{}, fmt.Errorf("%s thread %s transport failure: %s", d.Fetcher.Name(), th.ThreadID, session.Sanitize(err.Error()))
 		}
 		floor := reliability.Floor{
 			HasKnownHistory:       hasHistory,
-			ConsecutiveEmpty:      newest.ConsecutiveEmpty,
+			ConsecutiveEmpty:      cur.ConsecutiveEmpty,
 			ConsecutiveEmptyLimit: emptyPageLimit,
 		}
 		tr := dm.ClassifyThread(resp, floor)
@@ -235,59 +301,61 @@ func archiveThread(ctx context.Context, d Deps, th dm.Thread) (threadOutcome, er
 			// commit below
 		case reliability.StateSchemaDrift:
 			if tr.Page == nil {
-				// Structural drift — the page could not be parsed at all, so there
-				// is nothing safe to commit. Isolate this thread, continue others.
+				// Structural drift — nothing safe to commit. Isolate this thread.
 				v := tr.Verdict
-				return threadOutcome{drift: &v}, nil
+				return cur, threadOutcome{drift: &v}, nil
 			}
-			// Unknown item_type: the page parsed leniently — each unknown item is
-			// stored with item_type_known=0 and its raw_json — so committing loses
-			// nothing and a later parser re-derives it from raw (DECISIONS §4B).
-			// Flag the thread as drifted (to surface the new type) but keep paging.
+			// Unknown item_type: the page parsed leniently (unknown items stored
+			// item_type_known=0 + raw_json), so committing loses nothing and a later
+			// parser re-derives it from raw (DECISIONS §4B). Flag, keep paging.
 			v := tr.Verdict
-			drifted = &v
+			*drifted = &v
 		default: // AUTH·CHECKPOINT / RATE·LIMITED → halt whole run
-			return threadOutcome{terminal: &terminal{verdict: tr.Verdict, challengeURL: tr.ChallengeURL}}, nil
+			return cur, threadOutcome{terminal: &terminal{verdict: tr.Verdict, challengeURL: tr.ChallengeURL}}, nil
 		}
 
-		newCur := advanceCursor(newest, tr.Page, firstPage)
-		if err := d.Store.CommitThreadPage(ctx, tr.Page, newCur); err != nil {
-			return threadOutcome{}, err
+		cur = advanceCursor(cur, tr.Page, firstPage, mode)
+		if err := d.Store.CommitThreadPage(ctx, tr.Page, cur); err != nil {
+			return cur, threadOutcome{}, err
 		}
-		newest = newCur
 		firstPage = false
 
-		if res == dm.Grew && reachedStop(tr.Page, stopAt) {
-			return threadOutcome{drift: drifted}, nil // caught up to the known head
+		if reachedStop(tr.Page, stopAtItemID) {
+			return cur, threadOutcome{}, nil // caught up to the known head
 		}
 		// proceed=false means fully backfilled (empty cursor), the page cap, or a
 		// non-advancing cursor — all bounded stops for this thread, not failures.
 		proceed, guardErr := guard.Next(tr.Page.OldestCursor)
 		if !proceed {
 			_ = guardErr
-			return threadOutcome{drift: drifted}, nil
+			return cur, threadOutcome{}, nil
 		}
 		cursor = tr.Page.OldestCursor
 		if err := d.Pacer.Wait(ctx); err != nil {
-			return threadOutcome{}, err
+			return cur, threadOutcome{}, err
 		}
 	}
 }
 
-// advanceCursor computes the next persisted cursor. The newest anchor is set
-// only from the first (newest) page; the oldest cursor and empty-run counter
-// update every page.
-func advanceCursor(prev dm.ThreadCursor, page *dm.ThreadPage, firstPage bool) dm.ThreadCursor {
+// advanceCursor computes the next persisted cursor for a committed page. mode
+// controls which frontier moves: the newest anchor is set from the first page of
+// a head/full pass; the oldest cursor + empty-run counter advance every page of a
+// tail/full pass. A head catch-up leaves the backfill frontier untouched (and
+// vice-versa) so the two frontiers never clobber each other across runs.
+func advanceCursor(prev dm.ThreadCursor, page *dm.ThreadPage, firstPage bool, mode advanceMode) dm.ThreadCursor {
 	cur := prev
 	cur.SchemaVersion = dm.CursorSchemaVersion
-	cur.OldestCursor = page.OldestCursor
-	cur.Backfilled = page.OldestCursor == ""
-	if len(page.Messages) == 0 {
-		cur.ConsecutiveEmpty = prev.ConsecutiveEmpty + 1
-	} else {
-		cur.ConsecutiveEmpty = 0
+
+	if mode == advanceFull || mode == advanceTail {
+		cur.OldestCursor = page.OldestCursor
+		cur.Backfilled = page.OldestCursor == ""
+		if len(page.Messages) == 0 {
+			cur.ConsecutiveEmpty = prev.ConsecutiveEmpty + 1
+		} else {
+			cur.ConsecutiveEmpty = 0
+		}
 	}
-	if firstPage {
+	if (mode == advanceFull || mode == advanceHead) && firstPage {
 		newestID, newestTS := cur.NewestItemID, cur.NewestTimestampUS
 		for _, m := range page.Messages {
 			if m.TimestampUS > newestTS {
@@ -299,6 +367,30 @@ func advanceCursor(prev dm.ThreadCursor, page *dm.ThreadPage, firstPage bool) dm
 		cur.NewestTimestampUS = newestTS
 	}
 	return cur
+}
+
+// formatUnknownTypes renders an item_type→count map as "raven_media×12, profile×3"
+// (schema, not content — safe to log), ordered by count then name.
+func formatUnknownTypes(m map[string]int) string {
+	type kv struct {
+		t string
+		n int
+	}
+	pairs := make([]kv, 0, len(m))
+	for t, n := range m {
+		pairs = append(pairs, kv{t, n})
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		if pairs[i].n != pairs[j].n {
+			return pairs[i].n > pairs[j].n
+		}
+		return pairs[i].t < pairs[j].t
+	})
+	parts := make([]string, 0, len(pairs))
+	for _, p := range pairs {
+		parts = append(parts, fmt.Sprintf("%s×%d", p.t, p.n))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func reachedStop(page *dm.ThreadPage, stopAt string) bool {

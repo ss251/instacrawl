@@ -64,6 +64,8 @@ func run(args []string) int {
 		err = cmdCarve(cmdArgs)
 	case "search":
 		err = cmdSearch(jsonFlag, cmdArgs)
+	case "reparse":
+		err = cmdReparse(cmdArgs)
 	default:
 		err = usageError{msg: fmt.Sprintf("unknown command %q", cmd)}
 	}
@@ -158,6 +160,7 @@ commands:
   sync       archive your DMs and own content (posts, reels, saved, stories)
   carve      recover expired media bytes from a local browser/app cache (offline)
   search     full-text search your archived DMs and captions
+  reparse    re-parse messages with new item types from retained raw (offline)
   metadata   print the crawlkit control manifest (JSON)
   status     print archive status (JSON)
   version    print the version

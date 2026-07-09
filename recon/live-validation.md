@@ -83,7 +83,7 @@ the walker is the only active source.
 
 ### 2026-07-09 — FULL LIVE END-TO-END (not just schema probes)
 The web lane ran against live Instagram for real (session imported via
-`--from-browser chrome` → keychain; owner @sailesh1618): **auth OK → DM sync
+`--from-browser chrome` → keychain; the owner's own account): **auth OK → DM sync
 archived 80 threads / 2,547 messages → search found them** (incl. the thread
 with Eric Manganaro, 61 messages). Three real bugs surfaced and were fixed —
 each caught by the reliability spine, never by silent corruption:
@@ -109,8 +109,37 @@ each caught by the reliability spine, never by silent corruption:
    thread, instead of dropping the page — so nothing is lost and re-parsing after
    adding a type recovers it without re-fetching.
 
+### 2026-07-09 — DM lane closed out (post-live hardening)
+After the first live run, four follow-ups completed the DM lane. Each item type
+below was surfaced by a live drift flag, then its payload key was **confirmed
+from the retained raw** (the drift page kept its `raw_json`) before any parse
+handling was written — never guessed from a type name:
+
+- **Two more item types.** `raven_media` (view-once photo/video; payload under the
+  `raven_media` key — an offline top-level-key dump corrected an initial guess of
+  `visual_media`) and `profile` (a shared profile card; payload under `profile`).
+  Added to `KnownItemTypes`; `raven_media` folds into the media locator, `profile`
+  into the shared-payload column. Live drift fell 88 → 11 → 5 → 0 threads as the
+  types landed.
+- **Backfill resume proven across runs.** A thread's tail (deep-history) frontier
+  was written to the cursor but never read, so a page-capped run stranded the
+  remaining history and a later run re-anchored at the head and skipped it. Each
+  thread is now crawled as a head catch-up + a tail backfill, each advancing its
+  own frontier; a capped run's leftover history is picked up next run, and a
+  fully-backfilled unchanged thread still costs zero fetches.
+- **`reparse` recovered the live archive.** After adding the two types,
+  `instacrawl reparse` re-decoded the previously-drifted messages from their
+  retained raw with **no network** — "Re-parsed 16 of 16" — and `status --json`
+  went to `unknown_messages: 0` (7,007 messages, zero warnings). This is the §4B
+  contract closing the loop end to end: drift is stored, not dropped, and a parser
+  update recovers it offline.
+
 ### Method notes
 - `ds_user_id` and `sessionid` are httpOnly (not in `document.cookie`); read them
   via CDP `Network.getCookies` when needed. The authenticated `fetch` sends them
   automatically for same-origin `instagram.com` requests.
 - Required header on every call: `x-ig-app-id: 936619743392459` (web app id).
+- Confirm-before-parse for a drifted item type: dump the retained `raw_json`'s
+  **top-level keys only** (`sqlite3` + `python -c 'json.load…keys()'`) to find the
+  payload key — structure, never content. This caught the `raven_media` key that a
+  guess got wrong.

@@ -8,12 +8,25 @@
   carries the full instagram.com cookie jar (the DM endpoint needs `datr`, which
   the self-profile endpoint doesn't); the message-requests inbox uses
   `/inbox/?folder=pending` (the old `/pending_inbox/` path 404s on web) and is now
-  best-effort so it can't halt the main archive; and the `clip` (shared Reels) and
-  `video_call_event` message types are recognized. An unrecognized message type is
-  now stored (flagged, with its raw JSON) instead of dropping the page, so adding
-  the type later re-parses it with no re-fetch.
+  best-effort so it can't halt the main archive; and the `clip` (shared Reels),
+  `video_call_event`, `raven_media` (view-once media), and `profile` (shared
+  profile) message types are recognized. An unrecognized message type is now
+  stored (flagged, with its raw JSON) instead of dropping the page, so adding the
+  type later re-parses it with no re-fetch.
+- Thread backfill now resumes across runs. A thread has two independent frontiers
+  — its newest message and its backward-backfill point — and a page-capped or
+  interrupted run left the deep-history frontier stranded (and a later run could
+  clobber it). Each thread is now crawled in a head catch-up + a tail backfill
+  that advance their own frontier, so a capped run's remaining history is picked
+  up on the next run instead of being skipped, while a fully-backfilled unchanged
+  thread still costs zero fetches.
 
 ### Added
+- `instacrawl reparse` re-parses messages that were archived with an item type an
+  earlier build didn't recognize, from their retained raw JSON, with no network —
+  so a parser update recovers old messages without re-crawling. `status` now
+  reports an `unknown_messages` count (and a warning) so unrecognized types are
+  visible without reading a run's exit code.
 - Zero-friction session import: `instacrawl auth import --from-browser chrome`
   (or `auto`) reads your logged-in instagram.com session **straight from the
   browser's own cookie store** — no Cookie-Editor export, no copy/paste — like

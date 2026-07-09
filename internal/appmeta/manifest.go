@@ -198,8 +198,9 @@ func addArchiveCounts(s *control.Status, dbPath string) {
 		{"collections", "collections", st.CountCollections},
 		{"blobs", "media blobs", st.CountBlobs},
 		{"media_files_downloaded", "downloaded files", st.CountDownloadedFiles},
+		{"unknown_messages", "messages with unrecognized types", st.CountUnknownMessages},
 	}
-	var messages, media int
+	var messages, media, unknown int
 	for _, c := range counters {
 		n, err := c.fn(ctx)
 		if err != nil {
@@ -212,9 +213,15 @@ func addArchiveCounts(s *control.Status, dbPath string) {
 			messages = n
 		case "media":
 			media = n
+		case "unknown_messages":
+			unknown = n
 		}
 	}
 	s.Summary = fmt.Sprintf("archive present — %d messages, %d media", messages, media)
+	if unknown > 0 {
+		s.Warnings = append(s.Warnings, fmt.Sprintf(
+			"%d message(s) use item types this build does not recognize (raw retained) — run `instacrawl reparse` after updating", unknown))
+	}
 
 	if last, err := st.MaxFetchedAt(ctx); err == nil && last != "" {
 		s.LastSyncAt = last

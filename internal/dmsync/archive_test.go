@@ -115,6 +115,82 @@ func TestIdempotencyGate(t *testing.T) {
 	}
 }
 
+// --- A page-capped thread resumes its backfill on the next run (not skipped,
+//     and the deep frontier is not clobbered). ---
+
+func TestBackfillResumesAcrossRuns(t *testing.T) {
+	inbox := `{"seq_id":10,"inbox":{"has_older":false,"threads":[
+	  {"thread_id":"T1","last_activity_at":100,"users":[{"pk":5,"username":"bob"}]}]}}`
+	// A three-page thread: head → C1 → C2 → start. (The page guard's minimum of
+	// 1 still admits the first transition, so a three-page thread is what actually
+	// leaves the crawl mid-backfill under a 1-page cap.)
+	page1 := `{"thread":{"thread_id":"T1","has_older":true,"oldest_cursor":"C1",
+	  "users":[{"pk":5,"username":"bob"}],
+	  "items":[
+	    {"item_id":"i4","user_id":5,"timestamp":100,"item_type":"text","text":"d"},
+	    {"item_id":"i3","user_id":5,"timestamp":90,"item_type":"text","text":"c"}]}}`
+	page2 := `{"thread":{"thread_id":"T1","has_older":true,"oldest_cursor":"C2",
+	  "users":[{"pk":5,"username":"bob"}],
+	  "items":[
+	    {"item_id":"i2","user_id":5,"timestamp":80,"item_type":"text","text":"b"},
+	    {"item_id":"i1","user_id":5,"timestamp":70,"item_type":"text","text":"a"}]}}`
+	page3 := `{"thread":{"thread_id":"T1","has_older":false,
+	  "users":[{"pk":5,"username":"bob"}],
+	  "items":[{"item_id":"i0","user_id":5,"timestamp":60,"item_type":"text","text":"oldest"}]}}`
+	f := &replayFetcher{respond: func(req ig.Request) ig.RawResponse {
+		if strings.Contains(req.Path, "/threads/") {
+			switch req.Query.Get("cursor") {
+			case "C1":
+				return jsonResp(page2)
+			case "C2":
+				return jsonResp(page3)
+			default:
+				return jsonResp(page1)
+			}
+		}
+		return jsonResp(inbox)
+	}}
+	st := tempStore(t)
+	ctx := context.Background()
+
+	// Run 1: 1-page cap admits page1 + page2 then stops at C2 → 4 messages, NOT
+	// fully backfilled (frontier parked at C2).
+	d1 := deps(f, st)
+	d1.MaxThreadPages = 1
+	if _, err := Archive(ctx, d1); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := st.CountMessages(ctx); n != 4 {
+		t.Fatalf("run1 should store 4 messages, got %d", n)
+	}
+
+	// Run 2: the head is unchanged (100), but the thread is not backfilled — it
+	// must RESUME from C2 and fetch the final page, not skip.
+	s2, err := Archive(ctx, deps(f, st))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s2.ThreadsSkipped != 0 {
+		t.Fatalf("a partially-backfilled thread must not be skipped: %+v", s2)
+	}
+	if s2.MessagesNew != 1 {
+		t.Fatalf("run2 should backfill exactly the 1 remaining message: %+v", s2)
+	}
+	if n, _ := st.CountMessages(ctx); n != 5 {
+		t.Fatalf("expected 5 messages after backfill, got %d", n)
+	}
+
+	// Run 3: now fully backfilled AND unchanged → zero fetches.
+	calls := f.threadCalls
+	s3, err := Archive(ctx, deps(f, st))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s3.ThreadsSkipped != 1 || f.threadCalls != calls {
+		t.Fatalf("run3 (backfilled + unchanged) must skip with 0 fetches: %+v (calls %d→%d)", s3, calls, f.threadCalls)
+	}
+}
+
 // --- Terminal states halt the whole run. ---
 
 func TestCheckpointHaltsRun(t *testing.T) {

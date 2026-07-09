@@ -75,10 +75,12 @@ type itemJSON struct {
 	ItemType   string          `json:"item_type"`
 	Text       string          `json:"text"`
 	Media      json.RawMessage `json:"media"`
+	RavenMedia json.RawMessage `json:"raven_media"` // view-once media (its own payload key, confirmed live)
 	MediaShare json.RawMessage `json:"media_share"`
 	ReelShare  json.RawMessage `json:"reel_share"`
 	StoryShare json.RawMessage `json:"story_share"`
 	Clip       json.RawMessage `json:"clip"`
+	Profile    json.RawMessage `json:"profile"` // a shared profile card
 	Link       json.RawMessage `json:"link"`
 	Reactions  *struct {
 		Likes  []reactionJSON `json:"likes"`
@@ -122,8 +124,8 @@ func messageFrom(it itemJSON, threadID, source string, raw json.RawMessage) (Mes
 		RawItemType: it.ItemType,
 		Known:       known,
 		Text:        it.Text,
-		MediaJSON:   rawStr(it.Media),
-		SharedJSON:  firstNonEmpty(rawStr(it.MediaShare), rawStr(it.ReelShare), rawStr(it.StoryShare), rawStr(it.Clip)),
+		MediaJSON:   firstNonEmpty(rawStr(it.Media), rawStr(it.RavenMedia)),
+		SharedJSON:  firstNonEmpty(rawStr(it.MediaShare), rawStr(it.ReelShare), rawStr(it.StoryShare), rawStr(it.Clip), rawStr(it.Profile)),
 		LinkJSON:    rawStr(it.Link),
 		RawJSON:     string(raw),
 		Source:      source,
@@ -154,6 +156,20 @@ func messageFrom(it itemJSON, threadID, source string, raw json.RawMessage) (Mes
 		}
 	}
 	return m, ev
+}
+
+// ParseItem re-decodes a single stored message from its retained raw JSON — the
+// re-parse path (DECISIONS §4B): after a new item_type is added to
+// KnownItemTypes, its already-stored rows can be upgraded from raw with no
+// re-fetch. Returns the Message (and a projected ThreadEvent for event-like
+// types). The returned Message.Known reflects the CURRENT known-types set.
+func ParseItem(raw []byte, threadID, source string) (Message, *ThreadEvent, error) {
+	var it itemJSON
+	if err := json.Unmarshal(raw, &it); err != nil {
+		return Message{}, nil, fmt.Errorf("re-decode item: %w", err)
+	}
+	m, ev := messageFrom(it, threadID, source, json.RawMessage(raw))
+	return m, ev, nil
 }
 
 func firstNonEmpty(vs ...string) string {

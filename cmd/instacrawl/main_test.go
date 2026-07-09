@@ -8,6 +8,9 @@ import (
 )
 
 func TestRunExitCodes(t *testing.T) {
+	// Isolate HOME so no real archive/config (and therefore no real session) is
+	// visible — otherwise `sync` would resolve a live session and hit Instagram.
+	t.Setenv("HOME", t.TempDir())
 	cases := []struct {
 		name string
 		args []string
@@ -20,7 +23,7 @@ func TestRunExitCodes(t *testing.T) {
 		{"help ok", []string{"help"}, 0},
 		{"metadata ok", []string{"metadata", "--json"}, 0},
 		{"status ok", []string{"status"}, 0},
-		{"sync not implemented is runtime error", []string{"sync"}, 1},
+		{"sync with no session is a runtime error", []string{"sync"}, 1},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

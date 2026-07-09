@@ -246,6 +246,108 @@ on conflict(event_id) do update set
 func (st *Store) CountMessages(ctx context.Context) (int, error) { return st.count(ctx, "dm_message") }
 func (st *Store) CountThreads(ctx context.Context) (int, error)  { return st.count(ctx, "dm_thread") }
 
+// CountUnknownMessages counts messages whose item_type was not recognized at
+// archive time. They carry raw_json and can be upgraded by ReparseUnknownMessages
+// once the type is added to the parser.
+func (st *Store) CountUnknownMessages(ctx context.Context) (int, error) {
+	var n int
+	err := st.s.DB().QueryRowContext(ctx, `select count(*) from dm_message where item_type_known = 0`).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count unknown messages: %w", err)
+	}
+	return n, nil
+}
+
+// UnknownMessageTypes returns the distinct unrecognized item_type strings and
+// their counts — schema, not content, so it is safe to surface. Ordered by count.
+func (st *Store) UnknownMessageTypes(ctx context.Context) (map[string]int, error) {
+	rows, err := st.s.DB().QueryContext(ctx,
+		`select item_type, count(*) from dm_message where item_type_known = 0 group by item_type order by count(*) desc`)
+	if err != nil {
+		return nil, fmt.Errorf("query unknown message types: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]int{}
+	for rows.Next() {
+		var t string
+		var n int
+		if err := rows.Scan(&t, &n); err != nil {
+			return nil, err
+		}
+		out[t] = n
+	}
+	return out, rows.Err()
+}
+
+// ReparseUnknownMessages re-decodes every message stored with item_type_known=0
+// from its retained raw_json through the CURRENT parser, and re-upserts any the
+// parser now recognizes — the re-parse path of DECISIONS §4B: recover from a
+// parser gap without re-hitting the API. Returns (upgraded, eligible).
+func (st *Store) ReparseUnknownMessages(ctx context.Context) (upgraded, eligible int, err error) {
+	pending, err := st.unknownMessageRows(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	eligible = len(pending)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, r := range pending {
+		m, ev, perr := dm.ParseItem([]byte(r.raw), r.threadID, r.source)
+		if perr != nil || !m.Known {
+			continue // still unrecognized or unparseable → leave flagged
+		}
+		if err := st.reupsertMessage(ctx, m, ev, now); err != nil {
+			return upgraded, eligible, err
+		}
+		upgraded++
+	}
+	return upgraded, eligible, nil
+}
+
+type unknownRow struct{ threadID, source, raw string }
+
+// unknownMessageRows reads every item_type_known=0 row into memory (the rows are
+// closed before any re-upsert, so the single writer connection is free).
+func (st *Store) unknownMessageRows(ctx context.Context) ([]unknownRow, error) {
+	rows, err := st.s.DB().QueryContext(ctx,
+		`select thread_id, source, raw_json from dm_message where item_type_known = 0 and raw_json is not null`)
+	if err != nil {
+		return nil, fmt.Errorf("query unknown messages: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []unknownRow
+	for rows.Next() {
+		var r unknownRow
+		if err := rows.Scan(&r.threadID, &r.source, &r.raw); err != nil {
+			return nil, fmt.Errorf("scan unknown message: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (st *Store) reupsertMessage(ctx context.Context, m dm.Message, ev *dm.ThreadEvent, now string) error {
+	tx, err := st.s.DB().BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin reparse tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := upsertMessage(ctx, tx, m, now); err != nil {
+		return err
+	}
+	for _, rn := range m.Reactions {
+		if err := upsertReaction(ctx, tx, rn); err != nil {
+			return err
+		}
+	}
+	if ev != nil {
+		if err := upsertEvent(ctx, tx, *ev, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (st *Store) count(ctx context.Context, table string) (int, error) {
 	var n int
 	// table is a package-internal literal, never user input.

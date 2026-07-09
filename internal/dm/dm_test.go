@@ -116,6 +116,68 @@ func TestParseThreadSurfacesUnknownTypesReactionsReplies(t *testing.T) {
 	}
 }
 
+func TestParseNewShareAndMediaTypes(t *testing.T) {
+	body := []byte(`{"thread":{"thread_id":"T","has_older":false,
+	  "users":[{"pk":1,"username":"a"}],
+	  "items":[
+	    {"item_id":"r1","user_id":1,"timestamp":100,"item_type":"raven_media","raven_media":{"view_mode":"once"}},
+	    {"item_id":"p1","user_id":1,"timestamp":90,"item_type":"profile","profile":{"pk":"9","username":"shared"}},
+	    {"item_id":"c1","user_id":1,"timestamp":80,"item_type":"clip","clip":{"code":"z"}},
+	    {"item_id":"vc","user_id":1,"timestamp":70,"item_type":"video_call_event","video_call_event":{"action":"started"}},
+	    {"item_id":"u1","user_id":1,"timestamp":60,"item_type":"still_unknown"}
+	  ]}}`)
+	page, err := ParseThread(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]Message{}
+	for _, m := range page.Messages {
+		byID[m.ItemID] = m
+	}
+	if r := byID["r1"]; !r.Known || r.MediaJSON == "" {
+		t.Fatalf("raven_media should be recognized with a media payload: %+v", r)
+	}
+	if p := byID["p1"]; !p.Known || p.SharedJSON == "" {
+		t.Fatalf("profile should be recognized with a shared payload: %+v", p)
+	}
+	if c := byID["c1"]; !c.Known || c.SharedJSON == "" {
+		t.Fatalf("clip should be recognized with a shared payload: %+v", c)
+	}
+	if v := byID["vc"]; !v.Known {
+		t.Fatalf("video_call_event should be recognized: %+v", v)
+	}
+	// ONLY the genuinely unknown type is surfaced as drift.
+	if len(page.UnknownTypes) != 1 || page.UnknownTypes[0] != "still_unknown" {
+		t.Fatalf("unknown types wrong: %v", page.UnknownTypes)
+	}
+	// video_call_event projects to a thread event, like action_log.
+	foundVC := false
+	for _, e := range page.Events {
+		if e.EventID == "vc" && e.Kind == "video_call_event" {
+			foundVC = true
+		}
+	}
+	if !foundVC {
+		t.Fatalf("video_call_event not projected to a thread event: %+v", page.Events)
+	}
+}
+
+// TestParseItemReparse exercises the §4B re-parse path: one stored item's raw
+// JSON decoded back through the parser.
+func TestParseItemReparse(t *testing.T) {
+	raw := []byte(`{"item_id":"r1","user_id":1,"timestamp":100,"item_type":"raven_media","raven_media":{"view_mode":"once"}}`)
+	m, ev, err := ParseItem(raw, "T", "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.Known || m.ItemID != "r1" || m.ThreadID != "T" || m.MediaJSON == "" || m.Source != "web" {
+		t.Fatalf("reparsed item wrong: %+v", m)
+	}
+	if ev != nil {
+		t.Fatalf("raven_media must not project a thread event: %+v", ev)
+	}
+}
+
 func TestParseInboxAndPending(t *testing.T) {
 	body := []byte(`{"seq_id":98765,"inbox":{"has_older":true,"oldest_cursor":"NEXT",
 	  "threads":[{"thread_id":"1","thread_title":"a","is_group":false,"last_activity_at":123,
