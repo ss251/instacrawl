@@ -27,6 +27,12 @@
   so a parser update recovers old messages without re-crawling. `status` now
   reports an `unknown_messages` count (and a warning) so unrecognized types are
   visible without reading a run's exit code.
+- Reply linking: a message that replies to another now records the pointer at
+  archive time and is linked to its parent by an end-of-run local join (also run
+  by `reparse`) once the parent is in the archive — so a reply whose parent lands
+  on a later backfill page resolves on the next pass, the pass is idempotent, and
+  a reply to a parent older than the backfill frontier (or since unsent) is left
+  unlinked rather than dropped. `status` reports an `unresolved_replies` count.
 - Zero-friction session import: `instacrawl auth import --from-browser chrome`
   (or `auto`) reads your logged-in instagram.com session **straight from the
   browser's own cookie store** — no Cookie-Editor export, no copy/paste — like

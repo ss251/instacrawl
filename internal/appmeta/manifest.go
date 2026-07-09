@@ -199,6 +199,7 @@ func addArchiveCounts(s *control.Status, dbPath string) {
 		{"blobs", "media blobs", st.CountBlobs},
 		{"media_files_downloaded", "downloaded files", st.CountDownloadedFiles},
 		{"unknown_messages", "messages with unrecognized types", st.CountUnknownMessages},
+		{"unresolved_replies", "replies whose parent isn't archived yet", st.CountUnresolvedReplies},
 	}
 	var messages, media, unknown int
 	for _, c := range counters {

@@ -52,6 +52,7 @@ type Summary struct {
 	ThreadsFetched     int
 	ThreadsSkipped     int
 	MessagesNew        int
+	RepliesResolved    int    // reply pointers linked to a now-present parent this run
 	State              string // "OK" | terminal state name
 	Reason             string
 	ChallengeURL       string
@@ -144,6 +145,16 @@ func Archive(ctx context.Context, d Deps) (Summary, error) {
 		return sum, err
 	}
 	sum.MessagesNew = after - before
+
+	// Link reply pointers to parents that are now in the archive. A reply whose
+	// parent arrived on a later backfill page (or a different thread page) this run
+	// couldn't resolve at commit time; this end-of-run pass is a pure local join.
+	resolved, rerr := d.Store.ResolveReplies(ctx)
+	if rerr != nil {
+		return sum, rerr
+	}
+	sum.RepliesResolved = resolved
+
 	if len(sum.DriftedThreads) > 0 {
 		sum.State = reliability.StateSchemaDrift.String()
 		types := ""

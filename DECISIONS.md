@@ -179,6 +179,16 @@ over one field.
 - **Dead-man's-switch** (RESEARCH_loops3): track last-cursor-advance per
   resource; no advance across N ticks is an alertable state independent of any
   single run's exit code.
+- **Deferred reply resolution is a local join, not a fetch.** A reply's parent
+  can be older than the current page (or in another thread page not yet crawled),
+  so a reply is stored with its parent pointer and `reply_resolved=0`, then linked
+  by an end-of-run pass (also invoked by `reparse`) that flips the flag for every
+  reply whose parent is now in the archive. It costs no network, is idempotent
+  (a second pass links zero), is *sticky* (the message upsert never resets the
+  flag, so a no-op re-sync doesn't re-link), and a reply whose parent is older
+  than the backfill frontier or was later unsent stays unlinked — surfaced as a
+  plain `unresolved_replies` count, **not** a warning, because it's an expected
+  steady state, not a defect.
 
 ---
 
@@ -268,13 +278,16 @@ but stays opt-in / off by default.**
   real DMs use `clip`/`video_call_event`/`raven_media`/`profile` item types
   (each confirmed from retained raw before parse handling, never guessed), which
   also completed the §4B contract — an unknown item_type now commits leniently +
-  flags rather than dropping the page. Two follow-ups closed the lane: **backfill
-  now resumes across runs** (a thread carries independent head + tail frontiers,
-  each advanced by its own crawl phase, so a page-capped run's leftover deep
-  history is picked up next run instead of being skipped or clobbered), and the
+  flags rather than dropping the page. Three follow-ups closed the lane:
+  **backfill now resumes across runs** (a thread carries independent head + tail
+  frontiers, each advanced by its own crawl phase, so a page-capped run's leftover
+  deep history is picked up next run instead of being skipped or clobbered); the
   new **`instacrawl reparse`** verb re-decodes drifted messages from retained raw
-  with no network — on the live archive it recovered 16/16 and drove
-  `unknown_messages` to 0. See `recon/live-validation.md`.)_ Gate: two runs;
+  with no network (recovered 16/16 live, drove `unknown_messages` to 0); and
+  **reply linking** — an aggregate DB audit found 694 reply pointers captured but
+  never resolved, so the deferred local-join pass §4C anticipated was implemented
+  and linked 690/694 live (the other 4 point past the backfill frontier). See
+  `recon/live-validation.md`.)_ Gate: two runs;
   run-2 fetches 0 new for unchanged fully-backfilled threads (idempotent); every
   row carries `source='web'`.
 - **Phase 3 — own content + saved + liked.** _(**3a done** — `internal/feed`

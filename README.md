@@ -68,6 +68,10 @@ instacrawl search aurora
 instacrawl search --type dm "trip to japan"
 instacrawl search --type media sunset --limit 50
 
+# 5. After updating instacrawl: recover any messages an older build didn't
+#    recognize, from their retained raw JSON — no network, no re-crawl.
+instacrawl reparse
+
 instacrawl status --json               # honest counts: messages, media, …
 ```
 

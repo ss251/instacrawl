@@ -348,6 +348,42 @@ func (st *Store) reupsertMessage(ctx context.Context, m dm.Message, ev *dm.Threa
 	return tx.Commit()
 }
 
+// ResolveReplies links reply pointers to their parent message. A message stored
+// with a reply_to_item_id keeps reply_resolved=0 until its parent lands in the
+// archive — the parent may arrive on a later backfill page or via reparse, or be
+// older than the backfill frontier / already unsent. This pass is a pure local
+// join (no network): it flips reply_resolved to 1 for every reply whose parent is
+// now present, is idempotent (a second run resolves 0), and leaves a reply with
+// an absent parent unresolved so it resolves on its own once the parent arrives.
+// Returns the count newly resolved.
+func (st *Store) ResolveReplies(ctx context.Context) (resolved int, err error) {
+	res, err := st.s.DB().ExecContext(ctx, `
+update dm_message set reply_resolved = 1
+where reply_resolved = 0
+  and reply_to_item_id is not null and reply_to_item_id <> ''
+  and reply_to_item_id in (select item_id from dm_message)`)
+	if err != nil {
+		return 0, fmt.Errorf("resolve replies: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("resolve replies rows: %w", err)
+	}
+	return int(n), nil
+}
+
+// CountUnresolvedReplies counts reply pointers whose parent is not yet in the
+// archive (schema, not content — safe to surface).
+func (st *Store) CountUnresolvedReplies(ctx context.Context) (int, error) {
+	var n int
+	err := st.s.DB().QueryRowContext(ctx,
+		`select count(*) from dm_message where reply_resolved = 0 and reply_to_item_id is not null and reply_to_item_id <> ''`).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count unresolved replies: %w", err)
+	}
+	return n, nil
+}
+
 func (st *Store) count(ctx context.Context, table string) (int, error) {
 	var n int
 	// table is a package-internal literal, never user input.

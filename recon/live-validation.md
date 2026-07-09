@@ -133,6 +133,22 @@ handling was written — never guessed from a type name:
   went to `unknown_messages: 0` (7,007 messages, zero warnings). This is the §4B
   contract closing the loop end to end: drift is stored, not dropped, and a parser
   update recovers it offline.
+- **Reply linking, audited on the live archive.** An aggregate-only DB audit
+  (counts + enum distributions, never message content) showed reactions (871) and
+  reply pointers (694) were being captured, but every reply sat `reply_resolved=0`
+  — the "resolve on a later pass" the model anticipated was never implemented.
+  Added the end-of-run local join; running `reparse` on the live archive linked
+  **690 of 694** replies to a now-present parent, leaving 4 whose parent is older
+  than the backfill frontier (they'll link if a deeper backfill reaches the
+  parent). `status` now carries `unresolved_replies: 4` with no warning — an
+  expected steady state, not a defect. The audit also confirmed all 14 known item
+  types appear in real data (text 4,523 · clip 861 · placeholder 578 · action_log
+  392 · reel_share 273 · media_share 170 · media 53 · link 43 · raven_media 39 ·
+  voice_media 29 · video_call_event 26 · story_share 7 · profile 7 · animated_media
+  6), and events project correctly (action_log + video_call_event into the thread
+  event table). Pending-inbox threads were 0 on this account — indistinguishable
+  from "no message requests" via the DB alone, so whether the `?folder=pending`
+  walk populates is left to confirm on an account that has requests.
 
 ### Method notes
 - `ds_user_id` and `sessionid` are httpOnly (not in `document.cookie`); read them

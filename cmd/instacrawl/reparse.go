@@ -42,13 +42,30 @@ func cmdReparse(args []string) error {
 	if err != nil {
 		return fmt.Errorf("reparse: %w", err)
 	}
+	// Re-parsing can add a message that another message replied to, so re-run the
+	// local reply-resolution join (idempotent, no network).
+	resolved, err := st.ResolveReplies(ctx)
+	if err != nil {
+		return fmt.Errorf("resolve replies: %w", err)
+	}
+
 	if eligible == 0 {
 		fmt.Println("Nothing to re-parse — every archived message type is recognized.")
-		return nil
+	} else {
+		fmt.Printf("Re-parsed %d of %d previously-unrecognized message(s).\n", upgraded, eligible)
+		if remaining := eligible - upgraded; remaining > 0 {
+			fmt.Printf("%d still use item types this build doesn't recognize (their raw JSON is kept).\n", remaining)
+		}
 	}
-	fmt.Printf("Re-parsed %d of %d previously-unrecognized message(s).\n", upgraded, eligible)
-	if remaining := eligible - upgraded; remaining > 0 {
-		fmt.Printf("%d still use item types this build doesn't recognize (their raw JSON is kept).\n", remaining)
+	if resolved > 0 {
+		fmt.Printf("Linked %d repl%s to a now-present parent.\n", resolved, plural(resolved, "y", "ies"))
 	}
 	return nil
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
