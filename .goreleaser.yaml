@@ -34,3 +34,34 @@ archives:
 
 checksum:
   name_template: checksums.txt
+
+# On a tagged release, publish a Homebrew cask to the personal tap
+# github.com/ss251/homebrew-tap, so `brew install ss251/tap/instacrawl` works (macOS).
+# One-time setup (see README "Install"): create an empty ss251/homebrew-tap repo
+# and add a HOMEBREW_TAP_GITHUB_TOKEN secret (a PAT with `repo` scope on it) — the
+# default GITHUB_TOKEN can't push to a different repository.
+homebrew_casks:
+  - name: instacrawl
+    binaries:
+      - instacrawl
+    # Publish the cask only when the tap token is present, so a release before the
+    # tap is set up still ships binaries instead of failing on an empty token.
+    skip_upload: '{{ if eq (index .Env "HOMEBREW_TAP_GITHUB_TOKEN") "" }}true{{ else }}false{{ end }}'
+    repository:
+      owner: ss251
+      name: homebrew-tap
+      branch: main
+      token: "{{ index .Env \"HOMEBREW_TAP_GITHUB_TOKEN\" }}"
+    homepage: "https://github.com/ss251/instacrawl"
+    description: "Local-first CLI that archives and searches your own Instagram (DMs, posts, stories) to SQLite."
+    commit_author:
+      name: ss251
+      email: ss251@uw.edu
+    # The release binaries are not code-signed, so strip the Gatekeeper quarantine
+    # bit on install — otherwise the first run fails with "instacrawl is damaged".
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/instacrawl"]
+          end

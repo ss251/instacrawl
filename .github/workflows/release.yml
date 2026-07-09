@@ -35,7 +35,8 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  # NOTE: Homebrew tap publishing is intentionally not wired yet — it depends on
-  # the tap decision (own ss251/homebrew-tap vs joining openclaw/tap). See the
-  # "Distribution" section of the open-source plan. Until then, `release` just
-  # publishes cross-platform binaries to the GitHub Release.
+          # Push access to the separate ss251/homebrew-tap repo (the default
+          # GITHUB_TOKEN is scoped to this repo only). Add a PAT with `repo` scope
+          # on the tap as the HOMEBREW_TAP_GITHUB_TOKEN repo secret. If the secret
+          # is absent, GoReleaser skips only the cask step; the binaries still ship.
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

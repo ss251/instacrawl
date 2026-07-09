@@ -46,3 +46,6 @@ coverage.out
 # Lavish review surfaces and the private session handoff are internal notes.
 .lavish/
 KICKOFF.md
+
+# GoReleaser build output
+/dist/

@@ -114,15 +114,41 @@ If you are not comfortable with these trade-offs, don't run it.
 
 ## Install
 
-_Not yet released._ A Homebrew tap will follow the first tagged release. To
-build from source:
+### Homebrew (macOS / Linux) — after the first tagged release
 
 ```sh
-go build -o instacrawl ./cmd/instacrawl
-./instacrawl --help
+brew install ss251/tap/instacrawl
+```
+
+Taps [`ss251/homebrew-tap`](https://github.com/ss251/homebrew-tap) and installs
+the latest release for your platform. (It's a Homebrew cask; the release binaries
+are unsigned, so the cask strips the macOS Gatekeeper quarantine on install so
+the first run just works.)
+
+### From source
+
+```sh
+go install github.com/ss251/instacrawl/cmd/instacrawl@latest
+# or, from a clone:
+go build -o instacrawl ./cmd/instacrawl && ./instacrawl --help
 ```
 
 Requires Go 1.26.4+.
+
+### Maintainer: one-time tap setup
+
+Homebrew publishing is already wired into the release pipeline
+(`.goreleaser.yaml` → `homebrew_casks`, validated with `goreleaser check`). Before
+the first `brew install` works, do this once:
+
+1. Create an empty public repo `github.com/ss251/homebrew-tap`.
+2. Add a repository secret `HOMEBREW_TAP_GITHUB_TOKEN` on `ss251/instacrawl` — a
+   fine-grained PAT with **Contents: read/write** on `ss251/homebrew-tap` (the
+   default `GITHUB_TOKEN` can't push to a different repo).
+3. Tag a release: `git tag v0.1.0 && git push origin v0.1.0`. GoReleaser builds
+   the six-platform binaries **and** pushes `Casks/instacrawl.rb` to the tap. If
+   the secret isn't set yet, the release still ships binaries and just skips the
+   cask.
 
 ## How it fits crawlkit
 
